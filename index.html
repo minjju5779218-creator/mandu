@@ -49,7 +49,6 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useCallback } = React;
 
-    // --- INITIAL DATA CLEARED ---
     const INITIAL_USERS = [];
     const TODAY_STR = new Date().toISOString().split('T')[0];
     const INITIAL_REQUESTS = [];
@@ -59,7 +58,6 @@
     const DEFAULT_PASSCODE = '1234';
 
     function App() {
-      // Config State
       const [passcode, setPasscode] = useState(() => localStorage.getItem('app_shared_passcode') || DEFAULT_PASSCODE);
       const [isAuthenticated, setIsAuthenticated] = useState(() => sessionStorage.getItem('is_authenticated') === 'true');
       const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
@@ -67,16 +65,13 @@
       const [kakaoKey, setKakaoKey] = useState(() => localStorage.getItem('kakao_js_key') || '');
       const [supabaseClient, setSupabaseClient] = useState(null);
 
-      // Current Selected User State
       const [currentUser, setCurrentUser] = useState(() => {
         const saved = localStorage.getItem('current_user');
         return saved ? JSON.parse(saved) : null;
       });
 
-      // Navigation State: 'home', 'requests', 'expenses', 'users'
       const [activeTab, setActiveTab] = useState('home');
 
-      // Core Data State (Initialized empty, or loaded from localStorage)
       const [users, setUsers] = useState(() => {
         const saved = localStorage.getItem('local_users');
         return saved ? JSON.parse(saved) : INITIAL_USERS;
@@ -94,7 +89,6 @@
         return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
       });
 
-      // Modals State
       const [showPassModal, setShowPassModal] = useState(!isAuthenticated);
       const [showUserSelectModal, setShowUserSelectModal] = useState(isAuthenticated && !currentUser);
       const [selectedUserForLogin, setSelectedUserForLogin] = useState(null);
@@ -107,13 +101,11 @@
       const [showAddUserModal, setShowAddUserModal] = useState(users.length === 0);
       const [showEditProfileModal, setShowEditProfileModal] = useState(false);
 
-      // Search & Filter State
-      const [expenseViewMode, setExpenseViewMode] = useState('daily'); // 'daily' | 'monthly'
+      const [expenseViewMode, setExpenseViewMode] = useState('daily');
       const [searchTerm, setSearchTerm] = useState('');
       const [selectedMonth, setSelectedMonth] = useState(TODAY_STR.substring(0, 7));
       const [selectedUserFilter, setSelectedUserFilter] = useState('all');
 
-      // Initialize Kakao SDK
       useEffect(() => {
         if (kakaoKey && window.Kakao && !window.Kakao.isInitialized()) {
           try {
@@ -124,7 +116,6 @@
         }
       }, [kakaoKey]);
 
-      // Initialize Supabase Client
       useEffect(() => {
         if (supabaseUrl && supabaseKey && window.supabase) {
           try {
@@ -138,7 +129,6 @@
         }
       }, [supabaseUrl, supabaseKey]);
 
-      // Save to LocalStorage in Mock Mode
       useEffect(() => {
         if (!supabaseClient) {
           localStorage.setItem('local_users', JSON.stringify(users));
@@ -156,7 +146,6 @@
         }
       }, [currentUser]);
 
-      // Fetch Supabase Data
       const fetchSupabaseData = useCallback(async () => {
         if (!supabaseClient) return;
         try {
@@ -197,7 +186,6 @@
         }
       }, [supabaseClient, fetchSupabaseData]);
 
-      // Calculations
       const activeUsers = useMemo(() => users.filter(u => u.is_active), [users]);
 
       const pendingCountForMe = useMemo(() => {
@@ -243,7 +231,6 @@
         return { todayTotal, monthTotal, todayExpenses, monthExpenses, perUserMonth };
       }, [expenses, selectedMonth, users]);
 
-      // Kakao Share Handler
       const triggerKakaoShare = (req) => {
         const requesterName = users.find(u => u.id === req.requester_id)?.name || '친구';
         if (window.Kakao && window.Kakao.isInitialized()) {
@@ -276,7 +263,6 @@
         }
       };
 
-      // Handlers
       const handleAppLogin = (inputPass) => {
         if (inputPass === passcode) {
           setIsAuthenticated(true);
@@ -349,7 +335,6 @@
         }, 100);
       };
 
-      // [추가된 기능] 결재(구매) 요청 취소 핸들러
       const handleCancelRequest = async (req) => {
         if (req.requester_id !== currentUser?.id) {
           alert('본인이 올린 구매 요청만 취소할 수 있습니다.');
@@ -670,7 +655,6 @@
       return (
         <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col justify-between border-x border-slate-200 shadow-xl relative pb-20">
           
-          {/* HEADER BAR */}
           <header className="bg-emerald-600 text-white p-4 sticky top-0 z-30 shadow-md flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <i className="fa-solid fa-users-gear text-emerald-200 text-xl"></i>
@@ -699,7 +683,6 @@
             )}
           </header>
 
-          {/* MAIN CONTENT CONTAINERS */}
           <main className="p-4 flex-grow space-y-4 custom-scrollbar overflow-y-auto">
 
             {users.length === 0 && (
@@ -731,7 +714,6 @@
               </div>
             )}
 
-            {/* TAB 1: 🏠 HOME DASHBOARD */}
             {activeTab === 'home' && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -841,7 +823,6 @@
               </div>
             )}
 
-            {/* TAB 2: 🛒 PURCHASE REQUESTS & APPROVALS */}
             {activeTab === 'requests' && (
               <div className="space-y-3">
                 <div className="flex justify-between items-center bg-white p-3 rounded-xl border shadow-sm">
@@ -912,7 +893,6 @@
                             </span>
 
                             <div className="flex space-x-2">
-                              {/* [추가된 기능] 내가 올린 요청이고 구매완료가 안 되었다면 '결재 취소' 버튼 표시 */}
                               {req.requester_id === currentUser?.id && statusInfo.code !== 'purchased' && (
                                 <button 
                                   onClick={() => handleCancelRequest(req)}
@@ -957,7 +937,6 @@
               </div>
             )}
 
-            {/* TAB 3: 💰 EXPENSES RECORD & LIST */}
             {activeTab === 'expenses' && (
               <div className="space-y-3">
                 <div className="bg-white p-3 rounded-2xl border shadow-sm space-y-3">
@@ -1074,7 +1053,6 @@
               </div>
             )}
 
-            {/* TAB 4: ⚙️ USERS & SETTINGS */}
             {activeTab === 'users' && (
               <div className="space-y-4">
                 <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
@@ -1210,7 +1188,6 @@
 
           </main>
 
-          {/* BOTTOM NAVIGATION BAR */}
           <nav className="bg-white border-t border-slate-200 fixed bottom-0 max-w-md w-full z-20 flex justify-around py-2.5 shadow-lg">
             <button 
               onClick={() => setActiveTab('home')}
@@ -1252,10 +1229,6 @@
             </button>
           </nav>
 
-
-          {/* MODALS */}
-
-          {/* 1. App Passcode Modal */}
           {showPassModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl text-center">
@@ -1283,7 +1256,6 @@
             </div>
           )}
 
-          {/* 2. User Profile Select & Personal Password Modal */}
           {showUserSelectModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1351,7 +1323,6 @@
             </div>
           )}
 
-          {/* 3. Add Purchase Request Modal */}
           {showAddRequestModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1398,7 +1369,6 @@
             </div>
           )}
 
-          {/* 4. Add Direct Expense Modal */}
           {showAddExpenseModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1465,7 +1435,6 @@
             </div>
           )}
 
-          {/* 5. Reject Reason Modal */}
           {showRejectModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1497,7 +1466,6 @@
             </div>
           )}
 
-          {/* 6. Edit Expense Modal */}
           {showEditExpenseModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1563,7 +1531,6 @@
             </div>
           )}
 
-          {/* 7. DB Settings Modal */}
           {showDbSettingsModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1629,7 +1596,6 @@
             </div>
           )}
 
-          {/* 8. Add User Modal */}
           {showAddUserModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1665,7 +1631,6 @@
             </div>
           )}
 
-          {/* 9. Edit My Profile Modal */}
           {showEditProfileModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
@@ -1717,3 +1682,4 @@
   </script>
 </body>
 </html>
+```[cite: 1]
