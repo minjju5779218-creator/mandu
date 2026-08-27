@@ -15,12 +15,3448 @@
   <!-- Babel Standalone for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
+  <!-- Supabase JS Client --><!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>친구 공동 구매 & 지출 관리</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & React DOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel Standalone for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
   <!-- Supabase JS Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- Kakao SDK -->
   <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
   
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f1f5f9;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input, textarea, button, select {
+      user-select: text;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    // --- INITIAL DATA CLEARED ---
+    const INITIAL_USERS = [];
+    const TODAY_STR = new Date().toISOString().split('T')[0];
+    const INITIAL_REQUESTS = [];
+    const INITIAL_APPROVALS = [];
+    const INITIAL_EXPENSES = [];
+
+    const DEFAULT_PASSCODE = '1234';
+
+    function App() {
+      // Config State
+      const [passcode, setPasscode] = useState(() => localStorage.getItem('app_shared_passcode') || DEFAULT_PASSCODE);
+      const [isAuthenticated, setIsAuthenticated] = useState(() => sessionStorage.getItem('is_authenticated') === 'true');
+      const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
+      const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
+      const [kakaoKey, setKakaoKey] = useState(() => localStorage.getItem('kakao_js_key') || '');
+      const [supabaseClient, setSupabaseClient] = useState(null);
+
+      // Current Selected User State
+      const [currentUser, setCurrentUser] = useState(() => {
+        const saved = localStorage.getItem('current_user');
+        return saved ? JSON.parse(saved) : null;
+      });
+
+      // Navigation State: 'home', 'requests', 'expenses', 'users'
+      const [activeTab, setActiveTab] = useState('home');
+
+      // Core Data State (Initialized empty, or loaded from localStorage)
+      const [users, setUsers] = useState(() => {
+        const saved = localStorage.getItem('local_users');
+        return saved ? JSON.parse(saved) : INITIAL_USERS;
+      });
+      const [requests, setRequests] = useState(() => {
+        const saved = localStorage.getItem('local_requests');
+        return saved ? JSON.parse(saved) : INITIAL_REQUESTS;
+      });
+      const [approvals, setApprovals] = useState(() => {
+        const saved = localStorage.getItem('local_approvals');
+        return saved ? JSON.parse(saved) : INITIAL_APPROVALS;
+      });
+      const [expenses, setExpenses] = useState(() => {
+        const saved = localStorage.getItem('local_expenses');
+        return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+      });
+
+      // Modals State
+      const [showPassModal, setShowPassModal] = useState(!isAuthenticated);
+      const [showUserSelectModal, setShowUserSelectModal] = useState(isAuthenticated && !currentUser);
+      const [selectedUserForLogin, setSelectedUserForLogin] = useState(null);
+      
+      const [showAddRequestModal, setShowAddRequestModal] = useState(false);
+      const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
+      const [showEditExpenseModal, setShowEditExpenseModal] = useState(null);
+      const [showRejectModal, setShowRejectModal] = useState(null);
+      const [showDbSettingsModal, setShowDbSettingsModal] = useState(false);
+      const [showAddUserModal, setShowAddUserModal] = useState(users.length === 0);
+      const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+
+      // Search & Filter State
+      const [expenseViewMode, setExpenseViewMode] = useState('daily'); // 'daily' | 'monthly'
+      const [searchTerm, setSearchTerm] = useState('');
+      const [selectedMonth, setSelectedMonth] = useState(TODAY_STR.substring(0, 7));
+      const [selectedUserFilter, setSelectedUserFilter] = useState('all');
+
+      // Initialize Kakao SDK
+      useEffect(() => {
+        if (kakaoKey && window.Kakao && !window.Kakao.isInitialized()) {
+          try {
+            window.Kakao.init(kakaoKey);
+          } catch(e) {
+            console.error("Kakao Init Error:", e);
+          }
+        }
+      }, [kakaoKey]);
+
+      // Initialize Supabase Client
+      useEffect(() => {
+        if (supabaseUrl && supabaseKey && window.supabase) {
+          try {
+            const client = window.supabase.createClient(supabaseUrl, supabaseKey);
+            setSupabaseClient(client);
+          } catch (err) {
+            console.error("Supabase Init Error:", err);
+          }
+        } else {
+          setSupabaseClient(null);
+        }
+      }, [supabaseUrl, supabaseKey]);
+
+      // Save to LocalStorage in Mock Mode
+      useEffect(() => {
+        if (!supabaseClient) {
+          localStorage.setItem('local_users', JSON.stringify(users));
+          localStorage.setItem('local_requests', JSON.stringify(requests));
+          localStorage.setItem('local_approvals', JSON.stringify(approvals));
+          localStorage.setItem('local_expenses', JSON.stringify(expenses));
+        }
+      }, [users, requests, approvals, expenses, supabaseClient]);
+
+      useEffect(() => {
+        if (currentUser) {
+          localStorage.setItem('current_user', JSON.stringify(currentUser));
+        } else {
+          localStorage.removeItem('current_user');
+        }
+      }, [currentUser]);
+
+      // Fetch Supabase Data
+      const fetchSupabaseData = useCallback(async () => {
+        if (!supabaseClient) return;
+        try {
+          const { data: settingsData } = await supabaseClient.from('app_settings').select('*').single();
+          if (settingsData && settingsData.shared_password) {
+            setPasscode(settingsData.shared_password);
+            localStorage.setItem('app_shared_passcode', settingsData.shared_password);
+          }
+
+          const { data: uData } = await supabaseClient.from('users').select('*').order('created_at', { ascending: true });
+          if (uData) setUsers(uData);
+
+          const { data: rData } = await supabaseClient.from('purchase_requests').select('*').order('created_at', { ascending: false });
+          if (rData) setRequests(rData);
+
+          const { data: aData } = await supabaseClient.from('approvals').select('*');
+          if (aData) setApprovals(aData);
+
+          const { data: eData } = await supabaseClient.from('expenses').select('*').eq('is_deleted', false).order('date', { ascending: false });
+          if (eData) setExpenses(eData);
+        } catch (err) {
+          console.error("Failed to fetch Supabase data:", err);
+        }
+      }, [supabaseClient]);
+
+      useEffect(() => {
+        if (supabaseClient) {
+          fetchSupabaseData();
+          const channel = supabaseClient.channel('db-changes')
+            .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+              fetchSupabaseData();
+            })
+            .subscribe();
+
+          return () => {
+            supabaseClient.removeChannel(channel);
+          };
+        }
+      }, [supabaseClient, fetchSupabaseData]);
+
+      // Calculations
+      const activeUsers = useMemo(() => users.filter(u => u.is_active), [users]);
+
+      const pendingCountForMe = useMemo(() => {
+        if (!currentUser) return 0;
+        return requests.filter(req => {
+          if (req.status !== 'pending' && req.status !== 'approved') return false;
+          if (req.requester_id === currentUser.id) return false;
+          const myApproval = approvals.find(a => a.request_id === req.id && a.user_id === currentUser.id);
+          return !myApproval || myApproval.status === 'pending';
+        }).length;
+      }, [requests, approvals, currentUser]);
+
+      const getCalculatedRequestStatus = useCallback((req) => {
+        if (req.status === 'purchased') return { code: 'purchased', label: '🔵 구매 완료', color: 'bg-blue-100 text-blue-700 border-blue-300' };
+        
+        const reqApprovals = approvals.filter(a => a.request_id === req.id);
+        const hasRejection = reqApprovals.some(a => a.status === 'rejected');
+        if (hasRejection) return { code: 'rejected', label: '🔴 거절됨', color: 'bg-rose-100 text-rose-700 border-rose-300' };
+
+        const requiredApprovers = activeUsers.filter(u => u.id !== req.requester_id);
+        const approvedCount = reqApprovals.filter(a => a.status === 'approved' && requiredApprovers.some(u => u.id === a.user_id)).length;
+
+        if (requiredApprovers.length > 0 && approvedCount >= requiredApprovers.length) {
+          return { code: 'approved', label: '🟢 승인 완료', color: 'bg-emerald-100 text-emerald-700 border-emerald-300' };
+        }
+
+        return { code: 'pending', label: '🟡 승인 대기', color: 'bg-amber-100 text-amber-700 border-amber-300' };
+      }, [approvals, activeUsers]);
+
+      const expensesStats = useMemo(() => {
+        const todayExpenses = expenses.filter(e => e.date === TODAY_STR && !e.is_deleted);
+        const todayTotal = todayExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
+        const monthExpenses = expenses.filter(e => e.date.startsWith(selectedMonth) && !e.is_deleted);
+        const monthTotal = monthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
+        const perUserMonth = {};
+        users.forEach(u => perUserMonth[u.id] = 0);
+        monthExpenses.forEach(e => {
+          if (perUserMonth[e.user_id] !== undefined) perUserMonth[e.user_id] += Number(e.amount);
+        });
+
+        return { todayTotal, monthTotal, todayExpenses, monthExpenses, perUserMonth };
+      }, [expenses, selectedMonth, users]);
+
+      // Kakao Share Handler
+      const triggerKakaoShare = (req) => {
+        const requesterName = users.find(u => u.id === req.requester_id)?.name || '친구';
+        if (window.Kakao && window.Kakao.isInitialized()) {
+          window.Kakao.Share.sendDefault({
+            objectType: 'feed',
+            content: {
+              title: `🛒 [결재 요청] ${requesterName}님의 구매 요청`,
+              description: `• 물품: ${req.content}\n• 금액: ${Number(req.amount).toLocaleString()}원`,
+              imageUrl: 'https://cdn-icons-png.flaticon.com/512/2838/2838912.png',
+              link: {
+                mobileWebUrl: window.location.href,
+                webUrl: window.location.href,
+              },
+            },
+            buttons: [
+              {
+                title: '앱에서 승인하기',
+                link: {
+                  mobileWebUrl: window.location.href,
+                  webUrl: window.location.href,
+                },
+              },
+            ],
+          });
+        } else {
+          const shareText = `🛒 [결재 요청 올라왔어!]\n• 요청자: ${requesterName}\n• 물품: ${req.content}\n• 금액: ${Number(req.amount).toLocaleString()}원\n\n👉 승인하러 가기:\n${window.location.href}`;
+          navigator.clipboard.writeText(shareText).then(() => {
+            alert('카카오톡 공유 내용이 복사되었습니다!\n단톡방에 붙여넣어 공유해 보세요.');
+          });
+        }
+      };
+
+      // Handlers
+      const handleAppLogin = (inputPass) => {
+        if (inputPass === passcode) {
+          setIsAuthenticated(true);
+          sessionStorage.setItem('is_authenticated', 'true');
+          setShowPassModal(false);
+          if (users.length === 0) {
+            setShowAddUserModal(true);
+          } else if (!currentUser) {
+            setShowUserSelectModal(true);
+          }
+        } else {
+          alert('비밀번호가 올바르지 않습니다.');
+        }
+      };
+
+      const handleUserPersonalLogin = (user, inputPassword) => {
+        const userPass = user.password || '1234';
+        if (inputPassword === userPass) {
+          setCurrentUser(user);
+          setSelectedUserForLogin(null);
+          setShowUserSelectModal(false);
+        } else {
+          alert('개인 비밀번호가 올바르지 않습니다.');
+        }
+      };
+
+      const handleCreateRequest = async (content, amount) => {
+        if (!currentUser) return;
+        const newReq = {
+          id: 'r_' + Date.now(),
+          requester_id: currentUser.id,
+          content,
+          amount: Number(amount),
+          date: TODAY_STR,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        };
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('purchase_requests').insert([{
+            requester_id: currentUser.id,
+            content,
+            amount: Number(amount),
+            date: TODAY_STR,
+            status: 'pending'
+          }]);
+          if (error) return alert('구매 요청 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          const newApprovals = activeUsers
+            .filter(u => u.id !== currentUser.id)
+            .map(u => ({
+              id: 'a_' + Date.now() + '_' + u.id,
+              request_id: newReq.id,
+              user_id: u.id,
+              status: 'pending',
+              rejection_reason: ''
+            }));
+
+          setRequests(prev => [newReq, ...prev]);
+          setApprovals(prev => [...prev, ...newApprovals]);
+        }
+
+        setShowAddRequestModal(false);
+        
+        setTimeout(() => {
+          if (confirm('구매 요청이 등록되었습니다!\n단톡방에 카카오톡 메시지로 알리시겠습니까?')) {
+            triggerKakaoShare(newReq);
+          }
+        }, 100);
+      };
+
+      // [추가된 기능] 결재(구매) 요청 취소 핸들러
+      const handleCancelRequest = async (req) => {
+        if (req.requester_id !== currentUser?.id) {
+          alert('본인이 올린 구매 요청만 취소할 수 있습니다.');
+          return;
+        }
+
+        if (req.status === 'purchased') {
+          alert('이미 구매 완료 처리된 요청은 취소할 수 없습니다.');
+          return;
+        }
+
+        if (!confirm(`'${req.content}' 구매 요청을 정말 취소(삭제)하시겠습니까?`)) return;
+
+        if (supabaseClient) {
+          try {
+            await supabaseClient.from('approvals').delete().eq('request_id', req.id);
+            const { error } = await supabaseClient.from('purchase_requests').delete().eq('id', req.id);
+            if (error) throw error;
+            fetchSupabaseData();
+            alert('구매 요청이 취소되었습니다.');
+          } catch (err) {
+            console.error("요청 취소 오류:", err);
+            alert('요청 취소 실패: ' + err.message);
+          }
+        } else {
+          setRequests(prev => prev.filter(r => r.id !== req.id));
+          setApprovals(prev => prev.filter(a => a.request_id !== req.id));
+          alert('구매 요청이 취소되었습니다.');
+        }
+      };
+
+      const handleVoteApproval = async (requestId, status, reason = '') => {
+        if (!currentUser) return;
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('approvals').upsert([{
+            request_id: requestId,
+            user_id: currentUser.id,
+            status,
+            rejection_reason: reason,
+            updated_at: new Date().toISOString()
+          }], { onConflict: 'request_id,user_id' });
+
+          if (error) return alert('처리 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setApprovals(prev => {
+            const idx = prev.findIndex(a => a.request_id === requestId && a.user_id === currentUser.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], status, rejection_reason: reason };
+              return updated;
+            }
+            return [...prev, { id: 'a_' + Date.now(), request_id: requestId, user_id: currentUser.id, status, rejection_reason: reason }];
+          });
+        }
+        setShowRejectModal(null);
+      };
+
+      const handleCompletePurchase = async (req) => {
+        if (req.requester_id !== currentUser?.id) {
+          alert('결재를 신청한 본인만 실제 구매 완료 처리를 할 수 있습니다.');
+          return;
+        }
+
+        if (!confirm(`'${req.content}' 구매를 완료하고 지출 내역에 등록하시겠습니까?`)) return;
+
+        if (supabaseClient) {
+          await supabaseClient.from('purchase_requests').update({ status: 'purchased' }).eq('id', req.id);
+          await supabaseClient.from('expenses').insert([{
+            user_id: req.requester_id,
+            purchase_request_id: req.id,
+            content: req.content,
+            amount: req.amount,
+            date: TODAY_STR,
+            memo: '구매 요청 승인 후 구입'
+          }]);
+          fetchSupabaseData();
+        } else {
+          setRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'purchased' } : r));
+          const newExp = {
+            id: 'e_' + Date.now(),
+            user_id: req.requester_id,
+            purchase_request_id: req.id,
+            content: req.content,
+            amount: req.amount,
+            date: TODAY_STR,
+            memo: '구매 요청 승인 후 구입',
+            is_deleted: false,
+            created_at: new Date().toISOString()
+          };
+          setExpenses(prev => [newExp, ...prev]);
+        }
+      };
+
+      const handleCreateExpense = async (content, amount, date = TODAY_STR, memo = '') => {
+        if (!currentUser) return;
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('expenses').insert([{
+            user_id: currentUser.id,
+            content,
+            amount: Number(amount),
+            date: date || TODAY_STR,
+            memo
+          }]);
+          if (error) return alert('지출 등록 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          const newExp = {
+            id: 'e_' + Date.now(),
+            user_id: currentUser.id,
+            content,
+            amount: Number(amount),
+            date: date || TODAY_STR,
+            memo,
+            is_deleted: false,
+            created_at: new Date().toISOString()
+          };
+          setExpenses(prev => [newExp, ...prev]);
+        }
+        setShowAddExpenseModal(false);
+      };
+
+      const handleUpdateExpense = async (id, content, amount, date, memo) => {
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('expenses').update({
+            content,
+            amount: Number(amount),
+            date,
+            memo,
+            updated_at: new Date().toISOString()
+          }).eq('id', id);
+
+          if (error) return alert('수정 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setExpenses(prev => prev.map(e => e.id === id ? { ...e, content, amount: Number(amount), date, memo } : e));
+        }
+        setShowEditExpenseModal(null);
+      };
+
+      const handleDeleteExpense = async (id) => {
+        if (!confirm('정말 삭제하시겠습니까?')) return;
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('expenses').update({ is_deleted: true }).eq('id', id);
+          if (error) return alert('삭제 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setExpenses(prev => prev.map(e => e.id === id ? { ...e, is_deleted: true } : e));
+        }
+      };
+
+      const handleUpdateMyProfile = async (newName, newPassword) => {
+        if (!currentUser) return;
+        if (!newName.trim()) return alert('이름을 입력해 주세요.');
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('users').update({
+            name: newName.trim(),
+            password: newPassword.trim() || '1234'
+          }).eq('id', currentUser.id);
+
+          if (error) return alert('수정 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setUsers(prev => prev.map(u => u.id === currentUser.id ? {
+            ...u,
+            name: newName.trim(),
+            password: newPassword.trim() || '1234'
+          } : u));
+        }
+
+        const updatedUser = { ...currentUser, name: newName.trim(), password: newPassword.trim() || '1234' };
+        setCurrentUser(updatedUser);
+        setShowEditProfileModal(false);
+        alert('프로필 및 개인 비밀번호가 변경되었습니다!');
+      };
+
+      const handleAddUser = async (name, initialPass) => {
+        if (!name.trim()) return;
+        const newUserId = 'u_' + Date.now();
+        const newUserObj = {
+          id: newUserId,
+          name: name.trim(),
+          password: initialPass.trim() || '1234',
+          is_active: true
+        };
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('users').insert([newUserObj]);
+          if (error) return alert('추가 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setUsers(prev => [...prev, newUserObj]);
+        }
+
+        if (!currentUser) {
+          setCurrentUser(newUserObj);
+        }
+
+        setShowAddUserModal(false);
+      };
+
+      const handleToggleUserActive = async (user) => {
+        const nextActive = !user.is_active;
+        if (supabaseClient) {
+          await supabaseClient.from('users').update({ is_active: nextActive }).eq('id', user.id);
+          fetchSupabaseData();
+        } else {
+          setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: nextActive } : u));
+        }
+      };
+
+      const handleDeleteUser = async (user) => {
+        if (users.length <= 1) {
+          alert('최소 1명의 사용자는 남아있어야 합니다.');
+          return;
+        }
+        if (!confirm(`정말 '${user.name}' 사용자를 삭제하시겠습니까?\n(해당 사용자의 지출, 구매 요청 및 관련 승인 내역이 모두 함께 삭제됩니다.)`)) return;
+
+        if (supabaseClient) {
+          try {
+            const { data: myReqs } = await supabaseClient
+              .from('purchase_requests')
+              .select('id')
+              .eq('requester_id', user.id);
+            
+            const myReqIds = myReqs ? myReqs.map(r => r.id) : [];
+
+            if (myReqIds.length > 0) {
+              await supabaseClient.from('approvals').delete().in('request_id', myReqIds);
+              await supabaseClient.from('expenses').delete().in('purchase_request_id', myReqIds);
+            }
+
+            await supabaseClient.from('purchase_requests').delete().eq('requester_id', user.id);
+            await supabaseClient.from('approvals').delete().eq('user_id', user.id);
+            await supabaseClient.from('expenses').delete().eq('user_id', user.id);
+
+            const { error } = await supabaseClient.from('users').delete().eq('id', user.id);
+            if (error) throw error;
+
+            fetchSupabaseData();
+            alert(`'${user.name}'님과 관련된 모든 지출 및 결재 내역이 삭제되었습니다.`);
+          } catch (err) {
+            console.error("사용자 삭제 오류:", err);
+            alert('사용자 삭제 실패: ' + err.message);
+          }
+        } else {
+          setUsers(prev => prev.filter(u => u.id !== user.id));
+          const myReqIds = requests.filter(r => r.requester_id === user.id).map(r => r.id);
+          setExpenses(prev => prev.filter(e => e.user_id !== user.id && !myReqIds.includes(e.purchase_request_id)));
+          setRequests(prev => prev.filter(r => r.requester_id !== user.id));
+          setApprovals(prev => prev.filter(a => a.user_id !== user.id && !myReqIds.includes(a.request_id)));
+        }
+
+        if (currentUser?.id === user.id) {
+          setCurrentUser(null);
+          localStorage.removeItem('current_user');
+          setShowUserSelectModal(true);
+        }
+      };
+
+      const handleUpdatePasscode = async (newPass) => {
+        if (!newPass) return;
+        if (supabaseClient) {
+          await supabaseClient.from('app_settings').upsert([{ id: 1, shared_password: newPass }]);
+        }
+        setPasscode(newPass);
+        localStorage.setItem('app_shared_passcode', newPass);
+        alert('공동 비밀번호가 변경되었습니다!');
+      };
+
+      const filteredExpenses = useMemo(() => {
+        return expenses.filter(e => {
+          if (e.is_deleted) return false;
+          if (selectedUserFilter !== 'all' && e.user_id !== selectedUserFilter) return false;
+          if (selectedMonth && !e.date.startsWith(selectedMonth)) return false;
+          if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            const userName = users.find(u => u.id === e.user_id)?.name || '';
+            return e.content.toLowerCase().includes(term) || userName.toLowerCase().includes(term) || String(e.amount).includes(term) || e.date.includes(term);
+          }
+          return true;
+        });
+      }, [expenses, selectedUserFilter, selectedMonth, searchTerm, users]);
+
+      const groupedExpenses = useMemo(() => {
+        if (expenseViewMode === 'daily') {
+          const groups = {};
+          filteredExpenses.forEach(exp => {
+            if (!groups[exp.date]) groups[exp.date] = [];
+            groups[exp.date].push(exp);
+          });
+          return Object.keys(groups).sort().reverse().map(dateKey => ({
+            key: dateKey,
+            title: dateKey,
+            total: groups[dateKey].reduce((s, e) => s + Number(e.amount), 0),
+            items: groups[dateKey]
+          }));
+        } else {
+          const groups = {};
+          filteredExpenses.forEach(exp => {
+            const monthKey = exp.date.substring(0, 7);
+            if (!groups[monthKey]) groups[monthKey] = [];
+            groups[monthKey].push(exp);
+          });
+          return Object.keys(groups).sort().reverse().map(monthKey => ({
+            key: monthKey,
+            title: `${monthKey}월 전체`,
+            total: groups[monthKey].reduce((s, e) => s + Number(e.amount), 0),
+            items: groups[monthKey]
+          }));
+        }
+      }, [filteredExpenses, expenseViewMode]);
+
+      return (
+        <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col justify-between border-x border-slate-200 shadow-xl relative pb-20">
+          
+          {/* HEADER BAR */}
+          <header className="bg-emerald-600 text-white p-4 sticky top-0 z-30 shadow-md flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <i className="fa-solid fa-users-gear text-emerald-200 text-xl"></i>
+              <div>
+                <h1 className="font-bold text-lg leading-tight flex items-center gap-1.5">
+                  친구 공동 가계부
+                  {supabaseClient ? (
+                    <span className="bg-emerald-800 text-emerald-200 text-[10px] px-1.5 py-0.5 rounded-full font-normal">DB연동</span>
+                  ) : (
+                    <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-normal">데모모드</span>
+                  )}
+                </h1>
+                <p className="text-xs text-emerald-100">함께 쓰는 스마트 구매 승인</p>
+              </div>
+            </div>
+
+            {currentUser && (
+              <button 
+                onClick={() => setShowUserSelectModal(true)}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1.5 rounded-full text-xs font-medium flex items-center space-x-1.5 border border-emerald-500 shadow-sm active:scale-95 transition"
+              >
+                <i className="fa-solid fa-user-circle text-emerald-200"></i>
+                <span>{currentUser.name}</span>
+                <i className="fa-solid fa-chevron-down text-[10px]"></i>
+              </button>
+            )}
+          </header>
+
+          {/* MAIN CONTENT CONTAINERS */}
+          <main className="p-4 flex-grow space-y-4 custom-scrollbar overflow-y-auto">
+
+            {users.length === 0 && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-center space-y-2">
+                <i className="fa-solid fa-user-plus text-rose-500 text-2xl"></i>
+                <p className="font-bold text-sm text-rose-800">등록된 사용자가 없습니다!</p>
+                <p className="text-xs text-rose-600">앱을 시작하려면 먼저 사용자를 추가해 주세요.</p>
+                <button 
+                  onClick={() => setShowAddUserModal(true)}
+                  className="bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-sm hover:bg-rose-700"
+                >
+                  + 첫 사용자 등록하기
+                </button>
+              </div>
+            )}
+
+            {!supabaseClient && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-center justify-between shadow-sm">
+                <div className="flex items-center space-x-2">
+                  <i className="fa-solid fa-triangle-exclamation text-amber-500 text-base"></i>
+                  <span>현재 로컬 데모 모드입니다. Supabase DB를 연동하면 실시간 데이터 공유가 가능합니다.</span>
+                </div>
+                <button 
+                  onClick={() => setShowDbSettingsModal(true)}
+                  className="bg-amber-600 text-white font-bold px-2.5 py-1 rounded-lg ml-2 whitespace-nowrap hover:bg-amber-700"
+                >
+                  DB 연동
+                </button>
+              </div>
+            )}
+
+            {/* TAB 1: 🏠 HOME DASHBOARD */}
+            {activeTab === 'home' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 rounded-2xl shadow-sm">
+                    <p className="text-xs text-emerald-100 font-medium">오늘 전체 지출</p>
+                    <p className="text-2xl font-black mt-1">{expensesStats.todayTotal.toLocaleString()}<span className="text-sm font-normal">원</span></p>
+                    <p className="text-[11px] text-emerald-200 mt-2 flex items-center gap-1">
+                      <i className="fa-regular fa-calendar-check"></i> {TODAY_STR} 기준
+                    </p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-4 rounded-2xl shadow-sm">
+                    <p className="text-xs text-indigo-100 font-medium">이번 달 전체 지출</p>
+                    <p className="text-2xl font-black mt-1">{expensesStats.monthTotal.toLocaleString()}<span className="text-sm font-normal">원</span></p>
+                    <p className="text-[11px] text-indigo-200 mt-2 flex items-center gap-1">
+                      <i className="fa-regular fa-chart-bar"></i> {selectedMonth}월 총계
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                  <div className="flex justify-between items-center border-b pb-2">
+                    <h3 className="font-bold text-sm text-slate-700 flex items-center gap-1.5">
+                      <i className="fa-solid fa-users text-emerald-600"></i> 사람별 이번 달 지출 ({selectedMonth})
+                    </h3>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {users.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-4">등록된 친구가 없습니다.</p>
+                    ) : (
+                      users.map(u => {
+                        const userSpent = expensesStats.perUserMonth[u.id] || 0;
+                        const percentage = expensesStats.monthTotal > 0 ? Math.round((userSpent / expensesStats.monthTotal) * 100) : 0;
+                        return (
+                          <div key={u.id} className="space-y-1">
+                            <div className="flex justify-between text-xs font-semibold text-slate-700">
+                              <span className="flex items-center gap-1">
+                                {u.name} {!u.is_active && <span className="text-[10px] text-slate-400 font-normal">(비활성)</span>}
+                              </span>
+                              <span>{userSpent.toLocaleString()}원 ({percentage}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                              <div 
+                                className="bg-emerald-500 h-2 rounded-full transition-all duration-500" 
+                                style={{ width: `${percentage}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => setShowAddRequestModal(true)}
+                    className="bg-amber-500 hover:bg-amber-600 text-white font-bold p-3.5 rounded-xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition"
+                  >
+                    <i className="fa-solid fa-cart-shopping text-lg"></i>
+                    <span>🛒 구매 요청하기</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setShowAddExpenseModal(true)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition"
+                  >
+                    <i className="fa-solid fa-wallet text-lg"></i>
+                    <span>💰 바로 지출기록</span>
+                  </button>
+                </div>
+
+                {requests.filter(r => r.status === 'pending').length > 0 && (
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 shadow-sm space-y-3">
+                    <h3 className="font-bold text-sm text-amber-800 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <i className="fa-solid fa-hourglass-half text-amber-600 animate-pulse"></i> 승인 대기 중인 구매 요청
+                      </span>
+                      <span className="bg-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-full font-bold">
+                        {requests.filter(r => r.status === 'pending').length}건
+                      </span>
+                    </h3>
+
+                    <div className="space-y-2">
+                      {requests.filter(r => r.status === 'pending').map(req => {
+                        const requesterName = users.find(u => u.id === req.requester_id)?.name || '알 수 없음';
+                        return (
+                          <div key={req.id} className="bg-white p-3 rounded-xl border border-amber-200 flex items-center justify-between shadow-sm">
+                            <div>
+                              <p className="text-xs text-slate-500 font-medium">신청자: {requesterName}</p>
+                              <p className="font-bold text-slate-800 text-sm">{req.content}</p>
+                              <p className="text-xs font-semibold text-emerald-600 mt-0.5">{Number(req.amount).toLocaleString()}원</p>
+                            </div>
+                            <button 
+                              onClick={() => setActiveTab('requests')}
+                              className="bg-amber-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold hover:bg-amber-600"
+                            >
+                              결재하기
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: 🛒 PURCHASE REQUESTS & APPROVALS */}
+            {activeTab === 'requests' && (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center bg-white p-3 rounded-xl border shadow-sm">
+                  <div>
+                    <h2 className="font-bold text-sm text-slate-800">공동 구매 결재함</h2>
+                    <p className="text-xs text-slate-500">친구들이 올린 물품을 확인하고 승인/거절하세요.</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowAddRequestModal(true)}
+                    className="bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-sm hover:bg-amber-600"
+                  >
+                    + 새 요청
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {requests.length === 0 ? (
+                    <div className="text-center py-12 bg-white rounded-2xl border text-slate-400 text-xs">
+                      등록된 구매 요청이 없습니다.
+                    </div>
+                  ) : (
+                    requests.map(req => {
+                      const requester = users.find(u => u.id === req.requester_id);
+                      const statusInfo = getCalculatedRequestStatus(req);
+                      const reqApprovals = approvals.filter(a => a.request_id === req.id);
+
+                      return (
+                        <div key={req.id} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-sm text-slate-800">{requester?.name || '알수없음'}님의 요청</span>
+                                <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold border ${statusInfo.color}`}>
+                                  {statusInfo.label}
+                                </span>
+                              </div>
+                              <p className="text-base font-bold text-slate-900 mt-1">{req.content}</p>
+                              <p className="text-sm font-black text-emerald-600 mt-0.5">{Number(req.amount).toLocaleString()}원</p>
+                            </div>
+
+                            <button 
+                              onClick={() => triggerKakaoShare(req)}
+                              className="bg-yellow-300 hover:bg-yellow-400 text-yellow-900 text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 shadow-sm"
+                              title="카카오톡 공유"
+                            >
+                              <i className="fa-solid fa-share-nodes"></i> 공유
+                            </button>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex flex-wrap gap-2 text-xs">
+                            {activeUsers.filter(u => u.id !== req.requester_id).map(u => {
+                              const appItem = reqApprovals.find(a => a.user_id === u.id);
+                              const st = appItem ? appItem.status : 'pending';
+                              return (
+                                <div key={u.id} className="flex items-center space-x-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                                  <span className="font-medium text-slate-700">{u.name}:</span>
+                                  {st === 'approved' && <span className="text-emerald-600 font-bold">승인</span>}
+                                  {st === 'rejected' && <span className="text-rose-600 font-bold" title={appItem?.rejection_reason}>거절(사유)</span>}
+                                  {st === 'pending' && <span className="text-amber-500 font-medium">대기</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                            <span className="text-[11px] text-slate-400">
+                              {new Date(req.created_at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+
+                            <div className="flex space-x-2">
+                              {/* [추가된 기능] 내가 올린 요청이고 구매완료가 안 되었다면 '결재 취소' 버튼 표시 */}
+                              {req.requester_id === currentUser?.id && statusInfo.code !== 'purchased' && (
+                                <button 
+                                  onClick={() => handleCancelRequest(req)}
+                                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-lg"
+                                >
+                                  ❌ 결재 취소
+                                </button>
+                              )}
+
+                              {req.requester_id !== currentUser?.id && statusInfo.code !== 'purchased' && (
+                                <>
+                                  <button 
+                                    onClick={() => handleVoteApproval(req.id, 'approved')}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+                                  >
+                                    👍 승인
+                                  </button>
+                                  <button 
+                                    onClick={() => setShowRejectModal(req.id)}
+                                    className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+                                  >
+                                    👎 거절
+                                  </button>
+                                </>
+                              )}
+
+                              {statusInfo.code === 'approved' && req.requester_id === currentUser?.id && (
+                                <button 
+                                  onClick={() => handleCompletePurchase(req)}
+                                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm animate-bounce"
+                                >
+                                  🔵 실제 구매 완료 처리
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: 💰 EXPENSES RECORD & LIST */}
+            {activeTab === 'expenses' && (
+              <div className="space-y-3">
+                <div className="bg-white p-3 rounded-2xl border shadow-sm space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h2 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                      <i className="fa-solid fa-receipt text-emerald-600"></i> 지출 가계부 상세 내역
+                    </h2>
+                    <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                      <button 
+                        onClick={() => setExpenseViewMode('daily')}
+                        className={`px-3 py-1 rounded-lg transition ${expenseViewMode === 'daily' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
+                      >
+                        일별
+                      </button>
+                      <button 
+                        onClick={() => setExpenseViewMode('monthly')}
+                        className={`px-3 py-1 rounded-lg transition ${expenseViewMode === 'monthly' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
+                      >
+                        월별
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <input 
+                      type="month" 
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      className="bg-slate-50 border rounded-xl p-2 font-medium text-slate-700 focus:outline-emerald-500"
+                    />
+
+                    <select 
+                      value={selectedUserFilter}
+                      onChange={(e) => setSelectedUserFilter(e.target.value)}
+                      className="bg-slate-50 border rounded-xl p-2 font-medium text-slate-700 focus:outline-emerald-500"
+                    >
+                      <option value="all">모든 사람 보기</option>
+                      {users.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="relative">
+                    <i className="fa-solid fa-search absolute left-3 top-3 text-slate-400 text-xs"></i>
+                    <input 
+                      type="text" 
+                      placeholder="내용 또는 금액 검색..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full bg-slate-50 border rounded-xl pl-8 pr-3 py-2 text-xs focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {groupedExpenses.map(group => (
+                    <div key={group.key} className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+                      <div className="flex justify-between items-center border-b pb-2 text-xs font-bold text-slate-600">
+                        <span>📅 {group.title}</span>
+                        <span className="text-emerald-600 font-black">{group.total.toLocaleString()}원</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {group.items.map(exp => {
+                          const author = users.find(u => u.id === exp.user_id);
+                          return (
+                            <div key={exp.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-slate-100 transition">
+                              <div className="space-y-0.5">
+                                <div className="flex items-center space-x-1.5">
+                                  <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded">
+                                    {author?.name || '알수없음'}
+                                  </span>
+                                  <span className="font-bold text-sm text-slate-800">{exp.content}</span>
+                                </div>
+                                {exp.memo && <p className="text-[11px] text-slate-500 pl-1">{exp.memo}</p>}
+                                <span className="text-[10px] text-slate-400 pl-1">{exp.date}</span>
+                              </div>
+
+                              <div className="flex items-center space-x-2">
+                                <span className="font-black text-sm text-slate-900">{Number(exp.amount).toLocaleString()}원</span>
+                                {exp.user_id === currentUser?.id && (
+                                  <div className="flex space-x-1">
+                                    <button 
+                                      onClick={() => setShowEditExpenseModal(exp)}
+                                      className="text-slate-400 hover:text-blue-600 p-1 text-xs"
+                                      title="수정"
+                                    >
+                                      <i className="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteExpense(exp.id)}
+                                      className="text-slate-400 hover:text-rose-600 p-1 text-xs"
+                                      title="삭제"
+                                    >
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {groupedExpenses.length === 0 && (
+                    <div className="text-center py-10 bg-white rounded-2xl border text-slate-400 text-xs">
+                      지출 내역이 없습니다.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: ⚙️ USERS & SETTINGS */}
+            {activeTab === 'users' && (
+              <div className="space-y-4">
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                    <i className="fa-solid fa-user-shield text-emerald-600"></i> 내 프로필 설정
+                  </h3>
+                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-slate-500">현재 접속 중인 사용자</p>
+                      <p className="font-bold text-base text-emerald-800">{currentUser ? currentUser.name : '로그인되지 않음'}</p>
+                    </div>
+                    {currentUser ? (
+                      <button 
+                        onClick={() => setShowEditProfileModal(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-sm"
+                      >
+                        프로필/비번 변경
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => setShowUserSelectModal(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-sm"
+                      >
+                        로그인하기
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                      <i className="fa-solid fa-user-group text-emerald-600"></i> 함께 쓰는 친구 관리
+                    </h3>
+                    <button 
+                      onClick={() => setShowAddUserModal(true)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg"
+                    >
+                      + 친구 추가
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {users.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-4">등록된 친구가 없습니다.</p>
+                    ) : (
+                      users.map(u => (
+                        <div key={u.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-sm text-slate-800">{u.name}</span>
+                            {!u.is_active && <span className="text-[10px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded">비활성</span>}
+                          </div>
+                          <div className="flex space-x-1.5">
+                            <button 
+                              onClick={() => handleToggleUserActive(u)}
+                              className={`text-xs px-2.5 py-1 rounded-lg font-medium ${u.is_active ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}
+                            >
+                              {u.is_active ? '비활성화' : '활성화'}
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteUser(u)}
+                              className="text-xs px-2.5 py-1 bg-slate-200 hover:bg-rose-500 hover:text-white text-slate-600 rounded-lg transition"
+                              title="사용자 삭제"
+                            >
+                              <i className="fa-solid fa-trash"></i>
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                    <i className="fa-solid fa-lock text-emerald-600"></i> 앱 공동 비밀번호 변경
+                  </h3>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="password" 
+                      id="newSharedPassInput"
+                      placeholder="새 공동 비밀번호 입력"
+                      className="flex-grow bg-slate-50 border rounded-xl p-2 text-xs focus:outline-emerald-500"
+                    />
+                    <button 
+                      onClick={() => {
+                        const val = document.getElementById('newSharedPassInput').value;
+                        handleUpdatePasscode(val);
+                      }}
+                      className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl"
+                    >
+                      변경
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                      <i className="fa-solid fa-database text-emerald-600"></i> Supabase DB 연동 설정
+                    </h3>
+                    <button 
+                      onClick={() => setShowDbSettingsModal(true)}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl"
+                    >
+                      설정 열기
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {supabaseClient ? '🟢 Supabase DB가 정상 연동되어 있습니다.' : '🟡 현재 로컬 데모 모드로 동작 중입니다.'}
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                    <i className="fa-solid fa-comment text-yellow-500"></i> 카카오톡 공유 SDK 키 설정
+                  </h3>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="text" 
+                      placeholder="카카오 JavaScript 키 입력"
+                      value={kakaoKey}
+                      onChange={(e) => {
+                        setKakaoKey(e.target.value);
+                        localStorage.setItem('kakao_js_key', e.target.value);
+                      }}
+                      className="flex-grow bg-slate-50 border rounded-xl p-2 text-xs focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </main>
+
+          {/* BOTTOM NAVIGATION BAR */}
+          <nav className="bg-white border-t border-slate-200 fixed bottom-0 max-w-md w-full z-20 flex justify-around py-2.5 shadow-lg">
+            <button 
+              onClick={() => setActiveTab('home')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium ${activeTab === 'home' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <i className="fa-solid fa-house text-lg"></i>
+              <span>홈</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('requests')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium relative ${activeTab === 'requests' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <div className="relative">
+                <i className="fa-solid fa-cart-shopping text-lg"></i>
+                {pendingCountForMe > 0 && (
+                  <span className="absolute -top-1 -right-2 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold animate-pulse">
+                    {pendingCountForMe}
+                  </span>
+                )}
+              </div>
+              <span>결재함</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('expenses')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium ${activeTab === 'expenses' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <i className="fa-solid fa-wallet text-lg"></i>
+              <span>지출내역</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('users')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium ${activeTab === 'users' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <i className="fa-solid fa-gear text-lg"></i>
+              <span>설정</span>
+            </button>
+          </nav>
+
+
+          {/* MODALS */}
+
+          {/* 1. App Passcode Modal */}
+          {showPassModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl text-center">
+                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
+                  <i className="fa-solid fa-lock"></i>
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-slate-800">친구 공동 가계부 잠금</h3>
+                  <p className="text-xs text-slate-500 mt-1">공동 비밀번호를 입력해주세요. (기본: 1234)</p>
+                </div>
+                <input 
+                  type="password" 
+                  id="appPassInput"
+                  placeholder="비밀번호 입력"
+                  className="w-full bg-slate-50 border rounded-2xl p-3 text-center text-lg tracking-widest font-bold focus:outline-emerald-500"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAppLogin(e.target.value); }}
+                />
+                <button 
+                  onClick={() => handleAppLogin(document.getElementById('appPassInput').value)}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  입장하기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2. User Profile Select & Personal Password Modal */}
+          {showUserSelectModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="text-center">
+                  <h3 className="font-bold text-lg text-slate-800">누구로 접속하시겠어요?</h3>
+                  <p className="text-xs text-slate-500 mt-1">본인 이름을 선택하고 비밀번호를 입력하세요.</p>
+                </div>
+
+                {!selectedUserForLogin ? (
+                  <div className="space-y-2">
+                    {users.length === 0 ? (
+                      <div className="text-center py-4 space-y-2">
+                        <p className="text-xs text-slate-500">등록된 사용자가 없습니다.</p>
+                        <button 
+                          onClick={() => { setShowUserSelectModal(false); setShowAddUserModal(true); }}
+                          className="bg-emerald-600 text-white font-bold text-xs px-4 py-2 rounded-xl"
+                        >
+                          + 사용자 추가하기
+                        </button>
+                      </div>
+                    ) : (
+                      activeUsers.map(u => (
+                        <button 
+                          key={u.id}
+                          onClick={() => setSelectedUserForLogin(u)}
+                          className="w-full bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl flex items-center justify-between font-bold text-slate-700 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <i className="fa-solid fa-user-circle text-emerald-600 text-lg"></i> {u.name}
+                          </span>
+                          <i className="fa-solid fa-chevron-right text-xs text-slate-400"></i>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="bg-emerald-50 p-3 rounded-2xl flex items-center justify-between border border-emerald-200">
+                      <span className="font-bold text-emerald-800 text-sm">{selectedUserForLogin.name} 님</span>
+                      <button 
+                        onClick={() => setSelectedUserForLogin(null)}
+                        className="text-xs text-emerald-600 underline font-medium"
+                      >
+                        다른 사람 선택
+                      </button>
+                    </div>
+
+                    <input 
+                      type="password" 
+                      id="personalPassInput"
+                      placeholder="개인 비밀번호 입력 (기본: 1234)"
+                      className="w-full bg-slate-50 border rounded-2xl p-3 text-center text-sm font-bold focus:outline-emerald-500"
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleUserPersonalLogin(selectedUserForLogin, e.target.value); }}
+                    />
+
+                    <button 
+                      onClick={() => handleUserPersonalLogin(selectedUserForLogin, document.getElementById('personalPassInput').value)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                    >
+                      로그인 완료
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. Add Purchase Request Modal */}
+          {showAddRequestModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">🛒 새 구매 요청 등록</h3>
+                  <button onClick={() => setShowAddRequestModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">물품명</label>
+                    <input 
+                      type="text" 
+                      id="reqContent" 
+                      placeholder="예: 무신사 후드티, 쿠팡 휴지 등"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">금액 (원)</label>
+                    <input 
+                      type="number" 
+                      id="reqAmount" 
+                      placeholder="금액 입력"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const content = document.getElementById('reqContent').value;
+                    const amount = document.getElementById('reqAmount').value;
+                    if (!content || !amount) return alert('모든 항목을 입력해주세요.');
+                    handleCreateRequest(content, amount);
+                  }}
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  구매 요청 올리기 & 친구들 알리기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 4. Add Direct Expense Modal */}
+          {showAddExpenseModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">💰 바로 지출 기록</h3>
+                  <button onClick={() => setShowAddExpenseModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">사용 내역</label>
+                    <input 
+                      type="text" 
+                      id="expContent" 
+                      placeholder="예: 스타벅스 커피"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">금액 (원)</label>
+                    <input 
+                      type="number" 
+                      id="expAmount" 
+                      placeholder="금액 입력"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">날짜</label>
+                    <input 
+                      type="date" 
+                      id="expDate" 
+                      defaultValue={TODAY_STR}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">메모 (선택)</label>
+                    <input 
+                      type="text" 
+                      id="expMemo" 
+                      placeholder="추가 메모"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const content = document.getElementById('expContent').value;
+                    const amount = document.getElementById('expAmount').value;
+                    const date = document.getElementById('expDate').value;
+                    const memo = document.getElementById('expMemo').value;
+                    if (!content || !amount) return alert('내용과 금액을 입력해주세요.');
+                    handleCreateExpense(content, amount, date, memo);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  지출 기록 저장
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 5. Reject Reason Modal */}
+          {showRejectModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <h3 className="font-bold text-base text-slate-800">👎 거절 사유 입력</h3>
+                <input 
+                  type="text" 
+                  id="rejectReasonInput" 
+                  placeholder="예: 지금은 예산이 부족해요"
+                  className="w-full bg-slate-50 border rounded-xl p-3 text-sm focus:outline-rose-500"
+                />
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => setShowRejectModal(null)}
+                    className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold p-3 rounded-2xl"
+                  >
+                    취소
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const reason = document.getElementById('rejectReasonInput').value;
+                      handleVoteApproval(showRejectModal, 'rejected', reason);
+                    }}
+                    className="flex-1 bg-rose-500 hover:bg-rose-600 text-white font-bold p-3 rounded-2xl shadow-md"
+                  >
+                    거절 전달
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 6. Edit Expense Modal */}
+          {showEditExpenseModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">✏️ 지출 내역 수정</h3>
+                  <button onClick={() => setShowEditExpenseModal(null)} className="text-slate-400">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">사용 내역</label>
+                    <input 
+                      type="text" 
+                      id="editExpContent" 
+                      defaultValue={showEditExpenseModal.content}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">금액 (원)</label>
+                    <input 
+                      type="number" 
+                      id="editExpAmount" 
+                      defaultValue={showEditExpenseModal.amount}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">날짜</label>
+                    <input 
+                      type="date" 
+                      id="editExpDate" 
+                      defaultValue={showEditExpenseModal.date}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">메모</label>
+                    <input 
+                      type="text" 
+                      id="editExpMemo" 
+                      defaultValue={showEditExpenseModal.memo}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const content = document.getElementById('editExpContent').value;
+                    const amount = document.getElementById('editExpAmount').value;
+                    const date = document.getElementById('editExpDate').value;
+                    const memo = document.getElementById('editExpMemo').value;
+                    handleUpdateExpense(showEditExpenseModal.id, content, amount, date, memo);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  수정 완료
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 7. DB Settings Modal */}
+          {showDbSettingsModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">🔗 Supabase DB 연동 설정</h3>
+                  <button onClick={() => setShowDbSettingsModal(false)} className="text-slate-400">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-600">Supabase URL</label>
+                    <input 
+                      type="text" 
+                      placeholder="https://xxxx.supabase.co"
+                      value={supabaseUrl}
+                      onChange={(e) => setSupabaseUrl(e.target.value)}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-2.5 focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600">Supabase Anon Key</label>
+                    <input 
+                      type="password" 
+                      placeholder="eyJhbGciOi..."
+                      value={supabaseKey}
+                      onChange={(e) => setSupabaseKey(e.target.value)}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-2.5 focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex space-x-2 pt-2">
+                  <button 
+                    onClick={() => {
+                      localStorage.setItem('supabase_url', supabaseUrl);
+                      localStorage.setItem('supabase_key', supabaseKey);
+                      setShowDbSettingsModal(false);
+                      alert('저장되었습니다!');
+                      window.location.reload();
+                    }}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3 rounded-2xl shadow-md text-xs"
+                  >
+                    저장 및 적용
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setSupabaseUrl('');
+                      setSupabaseKey('');
+                      localStorage.removeItem('supabase_url');
+                      localStorage.removeItem('supabase_key');
+                      setShowDbSettingsModal(false);
+                      alert('연동이 해제되었습니다 (로컬 데모 모드)');
+                      window.location.reload();
+                    }}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold p-3 rounded-2xl text-xs"
+                  >
+                    연동 해제
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 8. Add User Modal */}
+          {showAddUserModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <h3 className="font-bold text-base text-slate-800">👤 새 친구 추가</h3>
+                <div className="space-y-3">
+                  <input 
+                    type="text" 
+                    id="newUserNameInput" 
+                    placeholder="친구 이름 (예: 지민)"
+                    className="w-full bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                  />
+                  <input 
+                    type="password" 
+                    id="newUserPassInput" 
+                    placeholder="초기 개인 비밀번호 (기본: 1234)"
+                    className="w-full bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                  />
+                </div>
+                <div className="flex space-x-2">
+                  <button onClick={() => setShowAddUserModal(false)} className="flex-1 bg-slate-200 text-slate-700 font-bold p-3 rounded-2xl">취소</button>
+                  <button 
+                    onClick={() => {
+                      const name = document.getElementById('newUserNameInput').value;
+                      const pass = document.getElementById('newUserPassInput').value;
+                      handleAddUser(name, pass);
+                    }}
+                    className="flex-1 bg-emerald-600 text-white font-bold p-3 rounded-2xl shadow-md"
+                  >
+                    추가
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 9. Edit My Profile Modal */}
+          {showEditProfileModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">⚙️ 프로필 및 비밀번호 변경</h3>
+                  <button onClick={() => setShowEditProfileModal(false)} className="text-slate-400">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">이름</label>
+                    <input 
+                      type="text" 
+                      id="editProfileName" 
+                      defaultValue={currentUser?.name}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">새 개인 비밀번호</label>
+                    <input 
+                      type="password" 
+                      id="editProfilePass" 
+                      placeholder="변경할 비밀번호 변경"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    const name = document.getElementById('editProfileName').value;
+                    const pass = document.getElementById('editProfilePass').value;
+                    handleUpdateMyProfile(name, pass);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  변경 저장
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Kakao SDK -->
+  <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
+  <!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>친구 공동 구매 & 지출 관리</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & React DOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel Standalone for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Supabase JS Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Kakao SDK -->
+  <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f1f5f9;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input, textarea, button, select {
+      user-select: text;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    // --- INITIAL DATA CLEARED ---
+    const INITIAL_USERS = [];
+    const TODAY_STR = new Date().toISOString().split('T')[0];
+    const INITIAL_REQUESTS = [];
+    const INITIAL_APPROVALS = [];
+    const INITIAL_EXPENSES = [];
+
+    const DEFAULT_PASSCODE = '1234';
+
+    function App() {
+      // Config State
+      const [passcode, setPasscode] = useState(() => localStorage.getItem('app_shared_passcode') || DEFAULT_PASSCODE);
+      const [isAuthenticated, setIsAuthenticated] = useState(() => sessionStorage.getItem('is_authenticated') === 'true');
+      const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
+      const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
+      const [kakaoKey, setKakaoKey] = useState(() => localStorage.getItem('kakao_js_key') || '');
+      const [supabaseClient, setSupabaseClient] = useState(null);
+
+      // Current Selected User State
+      const [currentUser, setCurrentUser] = useState(() => {
+        const saved = localStorage.getItem('current_user');
+        return saved ? JSON.parse(saved) : null;
+      });
+
+      // Navigation State: 'home', 'requests', 'expenses', 'users'
+      const [activeTab, setActiveTab] = useState('home');
+
+      // Core Data State (Initialized empty, or loaded from localStorage)
+      const [users, setUsers] = useState(() => {
+        const saved = localStorage.getItem('local_users');
+        return saved ? JSON.parse(saved) : INITIAL_USERS;
+      });
+      const [requests, setRequests] = useState(() => {
+        const saved = localStorage.getItem('local_requests');
+        return saved ? JSON.parse(saved) : INITIAL_REQUESTS;
+      });
+      const [approvals, setApprovals] = useState(() => {
+        const saved = localStorage.getItem('local_approvals');
+        return saved ? JSON.parse(saved) : INITIAL_APPROVALS;
+      });
+      const [expenses, setExpenses] = useState(() => {
+        const saved = localStorage.getItem('local_expenses');
+        return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+      });
+
+      // Modals State
+      const [showPassModal, setShowPassModal] = useState(!isAuthenticated);
+      const [showUserSelectModal, setShowUserSelectModal] = useState(isAuthenticated && !currentUser);
+      const [selectedUserForLogin, setSelectedUserForLogin] = useState(null);
+      
+      const [showAddRequestModal, setShowAddRequestModal] = useState(false);
+      const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
+      const [showEditExpenseModal, setShowEditExpenseModal] = useState(null);
+      const [showRejectModal, setShowRejectModal] = useState(null);
+      const [showDbSettingsModal, setShowDbSettingsModal] = useState(false);
+      const [showAddUserModal, setShowAddUserModal] = useState(users.length === 0);
+      const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+
+      // Search & Filter State
+      const [expenseViewMode, setExpenseViewMode] = useState('daily'); // 'daily' | 'monthly'
+      const [searchTerm, setSearchTerm] = useState('');
+      const [selectedMonth, setSelectedMonth] = useState(TODAY_STR.substring(0, 7));
+      const [selectedUserFilter, setSelectedUserFilter] = useState('all');
+
+      // Initialize Kakao SDK
+      useEffect(() => {
+        if (kakaoKey && window.Kakao && !window.Kakao.isInitialized()) {
+          try {
+            window.Kakao.init(kakaoKey);
+          } catch(e) {
+            console.error("Kakao Init Error:", e);
+          }
+        }
+      }, [kakaoKey]);
+
+      // Initialize Supabase Client
+      useEffect(() => {
+        if (supabaseUrl && supabaseKey && window.supabase) {
+          try {
+            const client = window.supabase.createClient(supabaseUrl, supabaseKey);
+            setSupabaseClient(client);
+          } catch (err) {
+            console.error("Supabase Init Error:", err);
+          }
+        } else {
+          setSupabaseClient(null);
+        }
+      }, [supabaseUrl, supabaseKey]);
+
+      // Save to LocalStorage in Mock Mode
+      useEffect(() => {
+        if (!supabaseClient) {
+          localStorage.setItem('local_users', JSON.stringify(users));
+          localStorage.setItem('local_requests', JSON.stringify(requests));
+          localStorage.setItem('local_approvals', JSON.stringify(approvals));
+          localStorage.setItem('local_expenses', JSON.stringify(expenses));
+        }
+      }, [users, requests, approvals, expenses, supabaseClient]);
+
+      useEffect(() => {
+        if (currentUser) {
+          localStorage.setItem('current_user', JSON.stringify(currentUser));
+        } else {
+          localStorage.removeItem('current_user');
+        }
+      }, [currentUser]);
+
+      // Fetch Supabase Data
+      const fetchSupabaseData = useCallback(async () => {
+        if (!supabaseClient) return;
+        try {
+          const { data: settingsData } = await supabaseClient.from('app_settings').select('*').single();
+          if (settingsData && settingsData.shared_password) {
+            setPasscode(settingsData.shared_password);
+            localStorage.setItem('app_shared_passcode', settingsData.shared_password);
+          }
+
+          const { data: uData } = await supabaseClient.from('users').select('*').order('created_at', { ascending: true });
+          if (uData) setUsers(uData);
+
+          const { data: rData } = await supabaseClient.from('purchase_requests').select('*').order('created_at', { ascending: false });
+          if (rData) setRequests(rData);
+
+          const { data: aData } = await supabaseClient.from('approvals').select('*');
+          if (aData) setApprovals(aData);
+
+          const { data: eData } = await supabaseClient.from('expenses').select('*').eq('is_deleted', false).order('date', { ascending: false });
+          if (eData) setExpenses(eData);
+        } catch (err) {
+          console.error("Failed to fetch Supabase data:", err);
+        }
+      }, [supabaseClient]);
+
+      useEffect(() => {
+        if (supabaseClient) {
+          fetchSupabaseData();
+          const channel = supabaseClient.channel('db-changes')
+            .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+              fetchSupabaseData();
+            })
+            .subscribe();
+
+          return () => {
+            supabaseClient.removeChannel(channel);
+          };
+        }
+      }, [supabaseClient, fetchSupabaseData]);
+
+      // Calculations
+      const activeUsers = useMemo(() => users.filter(u => u.is_active), [users]);
+
+      const pendingCountForMe = useMemo(() => {
+        if (!currentUser) return 0;
+        return requests.filter(req => {
+          if (req.status !== 'pending' && req.status !== 'approved') return false;
+          if (req.requester_id === currentUser.id) return false;
+          const myApproval = approvals.find(a => a.request_id === req.id && a.user_id === currentUser.id);
+          return !myApproval || myApproval.status === 'pending';
+        }).length;
+      }, [requests, approvals, currentUser]);
+
+      const getCalculatedRequestStatus = useCallback((req) => {
+        if (req.status === 'purchased') return { code: 'purchased', label: '🔵 구매 완료', color: 'bg-blue-100 text-blue-700 border-blue-300' };
+        
+        const reqApprovals = approvals.filter(a => a.request_id === req.id);
+        const hasRejection = reqApprovals.some(a => a.status === 'rejected');
+        if (hasRejection) return { code: 'rejected', label: '🔴 거절됨', color: 'bg-rose-100 text-rose-700 border-rose-300' };
+
+        const requiredApprovers = activeUsers.filter(u => u.id !== req.requester_id);
+        const approvedCount = reqApprovals.filter(a => a.status === 'approved' && requiredApprovers.some(u => u.id === a.user_id)).length;
+
+        if (requiredApprovers.length > 0 && approvedCount >= requiredApprovers.length) {
+          return { code: 'approved', label: '🟢 승인 완료', color: 'bg-emerald-100 text-emerald-700 border-emerald-300' };
+        }
+
+        return { code: 'pending', label: '🟡 승인 대기', color: 'bg-amber-100 text-amber-700 border-amber-300' };
+      }, [approvals, activeUsers]);
+
+      const expensesStats = useMemo(() => {
+        const todayExpenses = expenses.filter(e => e.date === TODAY_STR && !e.is_deleted);
+        const todayTotal = todayExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
+        const monthExpenses = expenses.filter(e => e.date.startsWith(selectedMonth) && !e.is_deleted);
+        const monthTotal = monthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
+        const perUserMonth = {};
+        users.forEach(u => perUserMonth[u.id] = 0);
+        monthExpenses.forEach(e => {
+          if (perUserMonth[e.user_id] !== undefined) perUserMonth[e.user_id] += Number(e.amount);
+        });
+
+        return { todayTotal, monthTotal, todayExpenses, monthExpenses, perUserMonth };
+      }, [expenses, selectedMonth, users]);
+
+      // Kakao Share Handler
+      const triggerKakaoShare = (req) => {
+        const requesterName = users.find(u => u.id === req.requester_id)?.name || '친구';
+        if (window.Kakao && window.Kakao.isInitialized()) {
+          window.Kakao.Share.sendDefault({
+            objectType: 'feed',
+            content: {
+              title: `🛒 [결재 요청] ${requesterName}님의 구매 요청`,
+              description: `• 물품: ${req.content}\n• 금액: ${Number(req.amount).toLocaleString()}원`,
+              imageUrl: 'https://cdn-icons-png.flaticon.com/512/2838/2838912.png',
+              link: {
+                mobileWebUrl: window.location.href,
+                webUrl: window.location.href,
+              },
+            },
+            buttons: [
+              {
+                title: '앱에서 승인하기',
+                link: {
+                  mobileWebUrl: window.location.href,
+                  webUrl: window.location.href,
+                },
+              },
+            ],
+          });
+        } else {
+          const shareText = `🛒 [결재 요청 올라왔어!]\n• 요청자: ${requesterName}\n• 물품: ${req.content}\n• 금액: ${Number(req.amount).toLocaleString()}원\n\n👉 승인하러 가기:\n${window.location.href}`;
+          navigator.clipboard.writeText(shareText).then(() => {
+            alert('카카오톡 공유 내용이 복사되었습니다!\n단톡방에 붙여넣어 공유해 보세요.');
+          });
+        }
+      };
+
+      // Handlers
+      const handleAppLogin = (inputPass) => {
+        if (inputPass === passcode) {
+          setIsAuthenticated(true);
+          sessionStorage.setItem('is_authenticated', 'true');
+          setShowPassModal(false);
+          if (users.length === 0) {
+            setShowAddUserModal(true);
+          } else if (!currentUser) {
+            setShowUserSelectModal(true);
+          }
+        } else {
+          alert('비밀번호가 올바르지 않습니다.');
+        }
+      };
+
+      const handleUserPersonalLogin = (user, inputPassword) => {
+        const userPass = user.password || '1234';
+        if (inputPassword === userPass) {
+          setCurrentUser(user);
+          setSelectedUserForLogin(null);
+          setShowUserSelectModal(false);
+        } else {
+          alert('개인 비밀번호가 올바르지 않습니다.');
+        }
+      };
+
+      const handleCreateRequest = async (content, amount) => {
+        if (!currentUser) return;
+        const newReq = {
+          id: 'r_' + Date.now(),
+          requester_id: currentUser.id,
+          content,
+          amount: Number(amount),
+          date: TODAY_STR,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        };
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('purchase_requests').insert([{
+            requester_id: currentUser.id,
+            content,
+            amount: Number(amount),
+            date: TODAY_STR,
+            status: 'pending'
+          }]);
+          if (error) return alert('구매 요청 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          const newApprovals = activeUsers
+            .filter(u => u.id !== currentUser.id)
+            .map(u => ({
+              id: 'a_' + Date.now() + '_' + u.id,
+              request_id: newReq.id,
+              user_id: u.id,
+              status: 'pending',
+              rejection_reason: ''
+            }));
+
+          setRequests(prev => [newReq, ...prev]);
+          setApprovals(prev => [...prev, ...newApprovals]);
+        }
+
+        setShowAddRequestModal(false);
+        
+        setTimeout(() => {
+          if (confirm('구매 요청이 등록되었습니다!\n단톡방에 카카오톡 메시지로 알리시겠습니까?')) {
+            triggerKakaoShare(newReq);
+          }
+        }, 100);
+      };
+
+      // [추가된 기능] 결재(구매) 요청 취소 핸들러
+      const handleCancelRequest = async (req) => {
+        if (req.requester_id !== currentUser?.id) {
+          alert('본인이 올린 구매 요청만 취소할 수 있습니다.');
+          return;
+        }
+
+        if (req.status === 'purchased') {
+          alert('이미 구매 완료 처리된 요청은 취소할 수 없습니다.');
+          return;
+        }
+
+        if (!confirm(`'${req.content}' 구매 요청을 정말 취소(삭제)하시겠습니까?`)) return;
+
+        if (supabaseClient) {
+          try {
+            await supabaseClient.from('approvals').delete().eq('request_id', req.id);
+            const { error } = await supabaseClient.from('purchase_requests').delete().eq('id', req.id);
+            if (error) throw error;
+            fetchSupabaseData();
+            alert('구매 요청이 취소되었습니다.');
+          } catch (err) {
+            console.error("요청 취소 오류:", err);
+            alert('요청 취소 실패: ' + err.message);
+          }
+        } else {
+          setRequests(prev => prev.filter(r => r.id !== req.id));
+          setApprovals(prev => prev.filter(a => a.request_id !== req.id));
+          alert('구매 요청이 취소되었습니다.');
+        }
+      };
+
+      const handleVoteApproval = async (requestId, status, reason = '') => {
+        if (!currentUser) return;
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('approvals').upsert([{
+            request_id: requestId,
+            user_id: currentUser.id,
+            status,
+            rejection_reason: reason,
+            updated_at: new Date().toISOString()
+          }], { onConflict: 'request_id,user_id' });
+
+          if (error) return alert('처리 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setApprovals(prev => {
+            const idx = prev.findIndex(a => a.request_id === requestId && a.user_id === currentUser.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], status, rejection_reason: reason };
+              return updated;
+            }
+            return [...prev, { id: 'a_' + Date.now(), request_id: requestId, user_id: currentUser.id, status, rejection_reason: reason }];
+          });
+        }
+        setShowRejectModal(null);
+      };
+
+      const handleCompletePurchase = async (req) => {
+        if (req.requester_id !== currentUser?.id) {
+          alert('결재를 신청한 본인만 실제 구매 완료 처리를 할 수 있습니다.');
+          return;
+        }
+
+        if (!confirm(`'${req.content}' 구매를 완료하고 지출 내역에 등록하시겠습니까?`)) return;
+
+        if (supabaseClient) {
+          await supabaseClient.from('purchase_requests').update({ status: 'purchased' }).eq('id', req.id);
+          await supabaseClient.from('expenses').insert([{
+            user_id: req.requester_id,
+            purchase_request_id: req.id,
+            content: req.content,
+            amount: req.amount,
+            date: TODAY_STR,
+            memo: '구매 요청 승인 후 구입'
+          }]);
+          fetchSupabaseData();
+        } else {
+          setRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'purchased' } : r));
+          const newExp = {
+            id: 'e_' + Date.now(),
+            user_id: req.requester_id,
+            purchase_request_id: req.id,
+            content: req.content,
+            amount: req.amount,
+            date: TODAY_STR,
+            memo: '구매 요청 승인 후 구입',
+            is_deleted: false,
+            created_at: new Date().toISOString()
+          };
+          setExpenses(prev => [newExp, ...prev]);
+        }
+      };
+
+      const handleCreateExpense = async (content, amount, date = TODAY_STR, memo = '') => {
+        if (!currentUser) return;
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('expenses').insert([{
+            user_id: currentUser.id,
+            content,
+            amount: Number(amount),
+            date: date || TODAY_STR,
+            memo
+          }]);
+          if (error) return alert('지출 등록 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          const newExp = {
+            id: 'e_' + Date.now(),
+            user_id: currentUser.id,
+            content,
+            amount: Number(amount),
+            date: date || TODAY_STR,
+            memo,
+            is_deleted: false,
+            created_at: new Date().toISOString()
+          };
+          setExpenses(prev => [newExp, ...prev]);
+        }
+        setShowAddExpenseModal(false);
+      };
+
+      const handleUpdateExpense = async (id, content, amount, date, memo) => {
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('expenses').update({
+            content,
+            amount: Number(amount),
+            date,
+            memo,
+            updated_at: new Date().toISOString()
+          }).eq('id', id);
+
+          if (error) return alert('수정 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setExpenses(prev => prev.map(e => e.id === id ? { ...e, content, amount: Number(amount), date, memo } : e));
+        }
+        setShowEditExpenseModal(null);
+      };
+
+      const handleDeleteExpense = async (id) => {
+        if (!confirm('정말 삭제하시겠습니까?')) return;
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('expenses').update({ is_deleted: true }).eq('id', id);
+          if (error) return alert('삭제 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setExpenses(prev => prev.map(e => e.id === id ? { ...e, is_deleted: true } : e));
+        }
+      };
+
+      const handleUpdateMyProfile = async (newName, newPassword) => {
+        if (!currentUser) return;
+        if (!newName.trim()) return alert('이름을 입력해 주세요.');
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('users').update({
+            name: newName.trim(),
+            password: newPassword.trim() || '1234'
+          }).eq('id', currentUser.id);
+
+          if (error) return alert('수정 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setUsers(prev => prev.map(u => u.id === currentUser.id ? {
+            ...u,
+            name: newName.trim(),
+            password: newPassword.trim() || '1234'
+          } : u));
+        }
+
+        const updatedUser = { ...currentUser, name: newName.trim(), password: newPassword.trim() || '1234' };
+        setCurrentUser(updatedUser);
+        setShowEditProfileModal(false);
+        alert('프로필 및 개인 비밀번호가 변경되었습니다!');
+      };
+
+      const handleAddUser = async (name, initialPass) => {
+        if (!name.trim()) return;
+        const newUserId = 'u_' + Date.now();
+        const newUserObj = {
+          id: newUserId,
+          name: name.trim(),
+          password: initialPass.trim() || '1234',
+          is_active: true
+        };
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from('users').insert([newUserObj]);
+          if (error) return alert('추가 실패: ' + error.message);
+          fetchSupabaseData();
+        } else {
+          setUsers(prev => [...prev, newUserObj]);
+        }
+
+        if (!currentUser) {
+          setCurrentUser(newUserObj);
+        }
+
+        setShowAddUserModal(false);
+      };
+
+      const handleToggleUserActive = async (user) => {
+        const nextActive = !user.is_active;
+        if (supabaseClient) {
+          await supabaseClient.from('users').update({ is_active: nextActive }).eq('id', user.id);
+          fetchSupabaseData();
+        } else {
+          setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: nextActive } : u));
+        }
+      };
+
+      const handleDeleteUser = async (user) => {
+        if (users.length <= 1) {
+          alert('최소 1명의 사용자는 남아있어야 합니다.');
+          return;
+        }
+        if (!confirm(`정말 '${user.name}' 사용자를 삭제하시겠습니까?\n(해당 사용자의 지출, 구매 요청 및 관련 승인 내역이 모두 함께 삭제됩니다.)`)) return;
+
+        if (supabaseClient) {
+          try {
+            const { data: myReqs } = await supabaseClient
+              .from('purchase_requests')
+              .select('id')
+              .eq('requester_id', user.id);
+            
+            const myReqIds = myReqs ? myReqs.map(r => r.id) : [];
+
+            if (myReqIds.length > 0) {
+              await supabaseClient.from('approvals').delete().in('request_id', myReqIds);
+              await supabaseClient.from('expenses').delete().in('purchase_request_id', myReqIds);
+            }
+
+            await supabaseClient.from('purchase_requests').delete().eq('requester_id', user.id);
+            await supabaseClient.from('approvals').delete().eq('user_id', user.id);
+            await supabaseClient.from('expenses').delete().eq('user_id', user.id);
+
+            const { error } = await supabaseClient.from('users').delete().eq('id', user.id);
+            if (error) throw error;
+
+            fetchSupabaseData();
+            alert(`'${user.name}'님과 관련된 모든 지출 및 결재 내역이 삭제되었습니다.`);
+          } catch (err) {
+            console.error("사용자 삭제 오류:", err);
+            alert('사용자 삭제 실패: ' + err.message);
+          }
+        } else {
+          setUsers(prev => prev.filter(u => u.id !== user.id));
+          const myReqIds = requests.filter(r => r.requester_id === user.id).map(r => r.id);
+          setExpenses(prev => prev.filter(e => e.user_id !== user.id && !myReqIds.includes(e.purchase_request_id)));
+          setRequests(prev => prev.filter(r => r.requester_id !== user.id));
+          setApprovals(prev => prev.filter(a => a.user_id !== user.id && !myReqIds.includes(a.request_id)));
+        }
+
+        if (currentUser?.id === user.id) {
+          setCurrentUser(null);
+          localStorage.removeItem('current_user');
+          setShowUserSelectModal(true);
+        }
+      };
+
+      const handleUpdatePasscode = async (newPass) => {
+        if (!newPass) return;
+        if (supabaseClient) {
+          await supabaseClient.from('app_settings').upsert([{ id: 1, shared_password: newPass }]);
+        }
+        setPasscode(newPass);
+        localStorage.setItem('app_shared_passcode', newPass);
+        alert('공동 비밀번호가 변경되었습니다!');
+      };
+
+      const filteredExpenses = useMemo(() => {
+        return expenses.filter(e => {
+          if (e.is_deleted) return false;
+          if (selectedUserFilter !== 'all' && e.user_id !== selectedUserFilter) return false;
+          if (selectedMonth && !e.date.startsWith(selectedMonth)) return false;
+          if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            const userName = users.find(u => u.id === e.user_id)?.name || '';
+            return e.content.toLowerCase().includes(term) || userName.toLowerCase().includes(term) || String(e.amount).includes(term) || e.date.includes(term);
+          }
+          return true;
+        });
+      }, [expenses, selectedUserFilter, selectedMonth, searchTerm, users]);
+
+      const groupedExpenses = useMemo(() => {
+        if (expenseViewMode === 'daily') {
+          const groups = {};
+          filteredExpenses.forEach(exp => {
+            if (!groups[exp.date]) groups[exp.date] = [];
+            groups[exp.date].push(exp);
+          });
+          return Object.keys(groups).sort().reverse().map(dateKey => ({
+            key: dateKey,
+            title: dateKey,
+            total: groups[dateKey].reduce((s, e) => s + Number(e.amount), 0),
+            items: groups[dateKey]
+          }));
+        } else {
+          const groups = {};
+          filteredExpenses.forEach(exp => {
+            const monthKey = exp.date.substring(0, 7);
+            if (!groups[monthKey]) groups[monthKey] = [];
+            groups[monthKey].push(exp);
+          });
+          return Object.keys(groups).sort().reverse().map(monthKey => ({
+            key: monthKey,
+            title: `${monthKey}월 전체`,
+            total: groups[monthKey].reduce((s, e) => s + Number(e.amount), 0),
+            items: groups[monthKey]
+          }));
+        }
+      }, [filteredExpenses, expenseViewMode]);
+
+      return (
+        <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col justify-between border-x border-slate-200 shadow-xl relative pb-20">
+          
+          {/* HEADER BAR */}
+          <header className="bg-emerald-600 text-white p-4 sticky top-0 z-30 shadow-md flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <i className="fa-solid fa-users-gear text-emerald-200 text-xl"></i>
+              <div>
+                <h1 className="font-bold text-lg leading-tight flex items-center gap-1.5">
+                  친구 공동 가계부
+                  {supabaseClient ? (
+                    <span className="bg-emerald-800 text-emerald-200 text-[10px] px-1.5 py-0.5 rounded-full font-normal">DB연동</span>
+                  ) : (
+                    <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-normal">데모모드</span>
+                  )}
+                </h1>
+                <p className="text-xs text-emerald-100">함께 쓰는 스마트 구매 승인</p>
+              </div>
+            </div>
+
+            {currentUser && (
+              <button 
+                onClick={() => setShowUserSelectModal(true)}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1.5 rounded-full text-xs font-medium flex items-center space-x-1.5 border border-emerald-500 shadow-sm active:scale-95 transition"
+              >
+                <i className="fa-solid fa-user-circle text-emerald-200"></i>
+                <span>{currentUser.name}</span>
+                <i className="fa-solid fa-chevron-down text-[10px]"></i>
+              </button>
+            )}
+          </header>
+
+          {/* MAIN CONTENT CONTAINERS */}
+          <main className="p-4 flex-grow space-y-4 custom-scrollbar overflow-y-auto">
+
+            {users.length === 0 && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-center space-y-2">
+                <i className="fa-solid fa-user-plus text-rose-500 text-2xl"></i>
+                <p className="font-bold text-sm text-rose-800">등록된 사용자가 없습니다!</p>
+                <p className="text-xs text-rose-600">앱을 시작하려면 먼저 사용자를 추가해 주세요.</p>
+                <button 
+                  onClick={() => setShowAddUserModal(true)}
+                  className="bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-sm hover:bg-rose-700"
+                >
+                  + 첫 사용자 등록하기
+                </button>
+              </div>
+            )}
+
+            {!supabaseClient && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-center justify-between shadow-sm">
+                <div className="flex items-center space-x-2">
+                  <i className="fa-solid fa-triangle-exclamation text-amber-500 text-base"></i>
+                  <span>현재 로컬 데모 모드입니다. Supabase DB를 연동하면 실시간 데이터 공유가 가능합니다.</span>
+                </div>
+                <button 
+                  onClick={() => setShowDbSettingsModal(true)}
+                  className="bg-amber-600 text-white font-bold px-2.5 py-1 rounded-lg ml-2 whitespace-nowrap hover:bg-amber-700"
+                >
+                  DB 연동
+                </button>
+              </div>
+            )}
+
+            {/* TAB 1: 🏠 HOME DASHBOARD */}
+            {activeTab === 'home' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 rounded-2xl shadow-sm">
+                    <p className="text-xs text-emerald-100 font-medium">오늘 전체 지출</p>
+                    <p className="text-2xl font-black mt-1">{expensesStats.todayTotal.toLocaleString()}<span className="text-sm font-normal">원</span></p>
+                    <p className="text-[11px] text-emerald-200 mt-2 flex items-center gap-1">
+                      <i className="fa-regular fa-calendar-check"></i> {TODAY_STR} 기준
+                    </p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-4 rounded-2xl shadow-sm">
+                    <p className="text-xs text-indigo-100 font-medium">이번 달 전체 지출</p>
+                    <p className="text-2xl font-black mt-1">{expensesStats.monthTotal.toLocaleString()}<span className="text-sm font-normal">원</span></p>
+                    <p className="text-[11px] text-indigo-200 mt-2 flex items-center gap-1">
+                      <i className="fa-regular fa-chart-bar"></i> {selectedMonth}월 총계
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                  <div className="flex justify-between items-center border-b pb-2">
+                    <h3 className="font-bold text-sm text-slate-700 flex items-center gap-1.5">
+                      <i className="fa-solid fa-users text-emerald-600"></i> 사람별 이번 달 지출 ({selectedMonth})
+                    </h3>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {users.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-4">등록된 친구가 없습니다.</p>
+                    ) : (
+                      users.map(u => {
+                        const userSpent = expensesStats.perUserMonth[u.id] || 0;
+                        const percentage = expensesStats.monthTotal > 0 ? Math.round((userSpent / expensesStats.monthTotal) * 100) : 0;
+                        return (
+                          <div key={u.id} className="space-y-1">
+                            <div className="flex justify-between text-xs font-semibold text-slate-700">
+                              <span className="flex items-center gap-1">
+                                {u.name} {!u.is_active && <span className="text-[10px] text-slate-400 font-normal">(비활성)</span>}
+                              </span>
+                              <span>{userSpent.toLocaleString()}원 ({percentage}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                              <div 
+                                className="bg-emerald-500 h-2 rounded-full transition-all duration-500" 
+                                style={{ width: `${percentage}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => setShowAddRequestModal(true)}
+                    className="bg-amber-500 hover:bg-amber-600 text-white font-bold p-3.5 rounded-xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition"
+                  >
+                    <i className="fa-solid fa-cart-shopping text-lg"></i>
+                    <span>🛒 구매 요청하기</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setShowAddExpenseModal(true)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition"
+                  >
+                    <i className="fa-solid fa-wallet text-lg"></i>
+                    <span>💰 바로 지출기록</span>
+                  </button>
+                </div>
+
+                {requests.filter(r => r.status === 'pending').length > 0 && (
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 shadow-sm space-y-3">
+                    <h3 className="font-bold text-sm text-amber-800 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <i className="fa-solid fa-hourglass-half text-amber-600 animate-pulse"></i> 승인 대기 중인 구매 요청
+                      </span>
+                      <span className="bg-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-full font-bold">
+                        {requests.filter(r => r.status === 'pending').length}건
+                      </span>
+                    </h3>
+
+                    <div className="space-y-2">
+                      {requests.filter(r => r.status === 'pending').map(req => {
+                        const requesterName = users.find(u => u.id === req.requester_id)?.name || '알 수 없음';
+                        return (
+                          <div key={req.id} className="bg-white p-3 rounded-xl border border-amber-200 flex items-center justify-between shadow-sm">
+                            <div>
+                              <p className="text-xs text-slate-500 font-medium">신청자: {requesterName}</p>
+                              <p className="font-bold text-slate-800 text-sm">{req.content}</p>
+                              <p className="text-xs font-semibold text-emerald-600 mt-0.5">{Number(req.amount).toLocaleString()}원</p>
+                            </div>
+                            <button 
+                              onClick={() => setActiveTab('requests')}
+                              className="bg-amber-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold hover:bg-amber-600"
+                            >
+                              결재하기
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: 🛒 PURCHASE REQUESTS & APPROVALS */}
+            {activeTab === 'requests' && (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center bg-white p-3 rounded-xl border shadow-sm">
+                  <div>
+                    <h2 className="font-bold text-sm text-slate-800">공동 구매 결재함</h2>
+                    <p className="text-xs text-slate-500">친구들이 올린 물품을 확인하고 승인/거절하세요.</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowAddRequestModal(true)}
+                    className="bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-sm hover:bg-amber-600"
+                  >
+                    + 새 요청
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {requests.length === 0 ? (
+                    <div className="text-center py-12 bg-white rounded-2xl border text-slate-400 text-xs">
+                      등록된 구매 요청이 없습니다.
+                    </div>
+                  ) : (
+                    requests.map(req => {
+                      const requester = users.find(u => u.id === req.requester_id);
+                      const statusInfo = getCalculatedRequestStatus(req);
+                      const reqApprovals = approvals.filter(a => a.request_id === req.id);
+
+                      return (
+                        <div key={req.id} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-sm text-slate-800">{requester?.name || '알수없음'}님의 요청</span>
+                                <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold border ${statusInfo.color}`}>
+                                  {statusInfo.label}
+                                </span>
+                              </div>
+                              <p className="text-base font-bold text-slate-900 mt-1">{req.content}</p>
+                              <p className="text-sm font-black text-emerald-600 mt-0.5">{Number(req.amount).toLocaleString()}원</p>
+                            </div>
+
+                            <button 
+                              onClick={() => triggerKakaoShare(req)}
+                              className="bg-yellow-300 hover:bg-yellow-400 text-yellow-900 text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 shadow-sm"
+                              title="카카오톡 공유"
+                            >
+                              <i className="fa-solid fa-share-nodes"></i> 공유
+                            </button>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex flex-wrap gap-2 text-xs">
+                            {activeUsers.filter(u => u.id !== req.requester_id).map(u => {
+                              const appItem = reqApprovals.find(a => a.user_id === u.id);
+                              const st = appItem ? appItem.status : 'pending';
+                              return (
+                                <div key={u.id} className="flex items-center space-x-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                                  <span className="font-medium text-slate-700">{u.name}:</span>
+                                  {st === 'approved' && <span className="text-emerald-600 font-bold">승인</span>}
+                                  {st === 'rejected' && <span className="text-rose-600 font-bold" title={appItem?.rejection_reason}>거절(사유)</span>}
+                                  {st === 'pending' && <span className="text-amber-500 font-medium">대기</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                            <span className="text-[11px] text-slate-400">
+                              {new Date(req.created_at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+
+                            <div className="flex space-x-2">
+                              {/* [추가된 기능] 내가 올린 요청이고 구매완료가 안 되었다면 '결재 취소' 버튼 표시 */}
+                              {req.requester_id === currentUser?.id && statusInfo.code !== 'purchased' && (
+                                <button 
+                                  onClick={() => handleCancelRequest(req)}
+                                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-lg"
+                                >
+                                  ❌ 결재 취소
+                                </button>
+                              )}
+
+                              {req.requester_id !== currentUser?.id && statusInfo.code !== 'purchased' && (
+                                <>
+                                  <button 
+                                    onClick={() => handleVoteApproval(req.id, 'approved')}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+                                  >
+                                    👍 승인
+                                  </button>
+                                  <button 
+                                    onClick={() => setShowRejectModal(req.id)}
+                                    className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+                                  >
+                                    👎 거절
+                                  </button>
+                                </>
+                              )}
+
+                              {statusInfo.code === 'approved' && req.requester_id === currentUser?.id && (
+                                <button 
+                                  onClick={() => handleCompletePurchase(req)}
+                                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm animate-bounce"
+                                >
+                                  🔵 실제 구매 완료 처리
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: 💰 EXPENSES RECORD & LIST */}
+            {activeTab === 'expenses' && (
+              <div className="space-y-3">
+                <div className="bg-white p-3 rounded-2xl border shadow-sm space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h2 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                      <i className="fa-solid fa-receipt text-emerald-600"></i> 지출 가계부 상세 내역
+                    </h2>
+                    <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                      <button 
+                        onClick={() => setExpenseViewMode('daily')}
+                        className={`px-3 py-1 rounded-lg transition ${expenseViewMode === 'daily' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
+                      >
+                        일별
+                      </button>
+                      <button 
+                        onClick={() => setExpenseViewMode('monthly')}
+                        className={`px-3 py-1 rounded-lg transition ${expenseViewMode === 'monthly' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
+                      >
+                        월별
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <input 
+                      type="month" 
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      className="bg-slate-50 border rounded-xl p-2 font-medium text-slate-700 focus:outline-emerald-500"
+                    />
+
+                    <select 
+                      value={selectedUserFilter}
+                      onChange={(e) => setSelectedUserFilter(e.target.value)}
+                      className="bg-slate-50 border rounded-xl p-2 font-medium text-slate-700 focus:outline-emerald-500"
+                    >
+                      <option value="all">모든 사람 보기</option>
+                      {users.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="relative">
+                    <i className="fa-solid fa-search absolute left-3 top-3 text-slate-400 text-xs"></i>
+                    <input 
+                      type="text" 
+                      placeholder="내용 또는 금액 검색..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full bg-slate-50 border rounded-xl pl-8 pr-3 py-2 text-xs focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {groupedExpenses.map(group => (
+                    <div key={group.key} className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+                      <div className="flex justify-between items-center border-b pb-2 text-xs font-bold text-slate-600">
+                        <span>📅 {group.title}</span>
+                        <span className="text-emerald-600 font-black">{group.total.toLocaleString()}원</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {group.items.map(exp => {
+                          const author = users.find(u => u.id === exp.user_id);
+                          return (
+                            <div key={exp.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-slate-100 transition">
+                              <div className="space-y-0.5">
+                                <div className="flex items-center space-x-1.5">
+                                  <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded">
+                                    {author?.name || '알수없음'}
+                                  </span>
+                                  <span className="font-bold text-sm text-slate-800">{exp.content}</span>
+                                </div>
+                                {exp.memo && <p className="text-[11px] text-slate-500 pl-1">{exp.memo}</p>}
+                                <span className="text-[10px] text-slate-400 pl-1">{exp.date}</span>
+                              </div>
+
+                              <div className="flex items-center space-x-2">
+                                <span className="font-black text-sm text-slate-900">{Number(exp.amount).toLocaleString()}원</span>
+                                {exp.user_id === currentUser?.id && (
+                                  <div className="flex space-x-1">
+                                    <button 
+                                      onClick={() => setShowEditExpenseModal(exp)}
+                                      className="text-slate-400 hover:text-blue-600 p-1 text-xs"
+                                      title="수정"
+                                    >
+                                      <i className="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteExpense(exp.id)}
+                                      className="text-slate-400 hover:text-rose-600 p-1 text-xs"
+                                      title="삭제"
+                                    >
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {groupedExpenses.length === 0 && (
+                    <div className="text-center py-10 bg-white rounded-2xl border text-slate-400 text-xs">
+                      지출 내역이 없습니다.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: ⚙️ USERS & SETTINGS */}
+            {activeTab === 'users' && (
+              <div className="space-y-4">
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                    <i className="fa-solid fa-user-shield text-emerald-600"></i> 내 프로필 설정
+                  </h3>
+                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-slate-500">현재 접속 중인 사용자</p>
+                      <p className="font-bold text-base text-emerald-800">{currentUser ? currentUser.name : '로그인되지 않음'}</p>
+                    </div>
+                    {currentUser ? (
+                      <button 
+                        onClick={() => setShowEditProfileModal(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-sm"
+                      >
+                        프로필/비번 변경
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => setShowUserSelectModal(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-sm"
+                      >
+                        로그인하기
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                      <i className="fa-solid fa-user-group text-emerald-600"></i> 함께 쓰는 친구 관리
+                    </h3>
+                    <button 
+                      onClick={() => setShowAddUserModal(true)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg"
+                    >
+                      + 친구 추가
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {users.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-4">등록된 친구가 없습니다.</p>
+                    ) : (
+                      users.map(u => (
+                        <div key={u.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-sm text-slate-800">{u.name}</span>
+                            {!u.is_active && <span className="text-[10px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded">비활성</span>}
+                          </div>
+                          <div className="flex space-x-1.5">
+                            <button 
+                              onClick={() => handleToggleUserActive(u)}
+                              className={`text-xs px-2.5 py-1 rounded-lg font-medium ${u.is_active ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}
+                            >
+                              {u.is_active ? '비활성화' : '활성화'}
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteUser(u)}
+                              className="text-xs px-2.5 py-1 bg-slate-200 hover:bg-rose-500 hover:text-white text-slate-600 rounded-lg transition"
+                              title="사용자 삭제"
+                            >
+                              <i className="fa-solid fa-trash"></i>
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                    <i className="fa-solid fa-lock text-emerald-600"></i> 앱 공동 비밀번호 변경
+                  </h3>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="password" 
+                      id="newSharedPassInput"
+                      placeholder="새 공동 비밀번호 입력"
+                      className="flex-grow bg-slate-50 border rounded-xl p-2 text-xs focus:outline-emerald-500"
+                    />
+                    <button 
+                      onClick={() => {
+                        const val = document.getElementById('newSharedPassInput').value;
+                        handleUpdatePasscode(val);
+                      }}
+                      className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl"
+                    >
+                      변경
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                      <i className="fa-solid fa-database text-emerald-600"></i> Supabase DB 연동 설정
+                    </h3>
+                    <button 
+                      onClick={() => setShowDbSettingsModal(true)}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl"
+                    >
+                      설정 열기
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {supabaseClient ? '🟢 Supabase DB가 정상 연동되어 있습니다.' : '🟡 현재 로컬 데모 모드로 동작 중입니다.'}
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                    <i className="fa-solid fa-comment text-yellow-500"></i> 카카오톡 공유 SDK 키 설정
+                  </h3>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="text" 
+                      placeholder="카카오 JavaScript 키 입력"
+                      value={kakaoKey}
+                      onChange={(e) => {
+                        setKakaoKey(e.target.value);
+                        localStorage.setItem('kakao_js_key', e.target.value);
+                      }}
+                      className="flex-grow bg-slate-50 border rounded-xl p-2 text-xs focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </main>
+
+          {/* BOTTOM NAVIGATION BAR */}
+          <nav className="bg-white border-t border-slate-200 fixed bottom-0 max-w-md w-full z-20 flex justify-around py-2.5 shadow-lg">
+            <button 
+              onClick={() => setActiveTab('home')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium ${activeTab === 'home' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <i className="fa-solid fa-house text-lg"></i>
+              <span>홈</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('requests')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium relative ${activeTab === 'requests' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <div className="relative">
+                <i className="fa-solid fa-cart-shopping text-lg"></i>
+                {pendingCountForMe > 0 && (
+                  <span className="absolute -top-1 -right-2 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold animate-pulse">
+                    {pendingCountForMe}
+                  </span>
+                )}
+              </div>
+              <span>결재함</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('expenses')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium ${activeTab === 'expenses' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <i className="fa-solid fa-wallet text-lg"></i>
+              <span>지출내역</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('users')}
+              className={`flex flex-col items-center space-y-1 text-xs font-medium ${activeTab === 'users' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <i className="fa-solid fa-gear text-lg"></i>
+              <span>설정</span>
+            </button>
+          </nav>
+
+
+          {/* MODALS */}
+
+          {/* 1. App Passcode Modal */}
+          {showPassModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl text-center">
+                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
+                  <i className="fa-solid fa-lock"></i>
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-slate-800">친구 공동 가계부 잠금</h3>
+                  <p className="text-xs text-slate-500 mt-1">공동 비밀번호를 입력해주세요. (기본: 1234)</p>
+                </div>
+                <input 
+                  type="password" 
+                  id="appPassInput"
+                  placeholder="비밀번호 입력"
+                  className="w-full bg-slate-50 border rounded-2xl p-3 text-center text-lg tracking-widest font-bold focus:outline-emerald-500"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAppLogin(e.target.value); }}
+                />
+                <button 
+                  onClick={() => handleAppLogin(document.getElementById('appPassInput').value)}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  입장하기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2. User Profile Select & Personal Password Modal */}
+          {showUserSelectModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="text-center">
+                  <h3 className="font-bold text-lg text-slate-800">누구로 접속하시겠어요?</h3>
+                  <p className="text-xs text-slate-500 mt-1">본인 이름을 선택하고 비밀번호를 입력하세요.</p>
+                </div>
+
+                {!selectedUserForLogin ? (
+                  <div className="space-y-2">
+                    {users.length === 0 ? (
+                      <div className="text-center py-4 space-y-2">
+                        <p className="text-xs text-slate-500">등록된 사용자가 없습니다.</p>
+                        <button 
+                          onClick={() => { setShowUserSelectModal(false); setShowAddUserModal(true); }}
+                          className="bg-emerald-600 text-white font-bold text-xs px-4 py-2 rounded-xl"
+                        >
+                          + 사용자 추가하기
+                        </button>
+                      </div>
+                    ) : (
+                      activeUsers.map(u => (
+                        <button 
+                          key={u.id}
+                          onClick={() => setSelectedUserForLogin(u)}
+                          className="w-full bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl flex items-center justify-between font-bold text-slate-700 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <i className="fa-solid fa-user-circle text-emerald-600 text-lg"></i> {u.name}
+                          </span>
+                          <i className="fa-solid fa-chevron-right text-xs text-slate-400"></i>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="bg-emerald-50 p-3 rounded-2xl flex items-center justify-between border border-emerald-200">
+                      <span className="font-bold text-emerald-800 text-sm">{selectedUserForLogin.name} 님</span>
+                      <button 
+                        onClick={() => setSelectedUserForLogin(null)}
+                        className="text-xs text-emerald-600 underline font-medium"
+                      >
+                        다른 사람 선택
+                      </button>
+                    </div>
+
+                    <input 
+                      type="password" 
+                      id="personalPassInput"
+                      placeholder="개인 비밀번호 입력 (기본: 1234)"
+                      className="w-full bg-slate-50 border rounded-2xl p-3 text-center text-sm font-bold focus:outline-emerald-500"
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleUserPersonalLogin(selectedUserForLogin, e.target.value); }}
+                    />
+
+                    <button 
+                      onClick={() => handleUserPersonalLogin(selectedUserForLogin, document.getElementById('personalPassInput').value)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                    >
+                      로그인 완료
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. Add Purchase Request Modal */}
+          {showAddRequestModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">🛒 새 구매 요청 등록</h3>
+                  <button onClick={() => setShowAddRequestModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">물품명</label>
+                    <input 
+                      type="text" 
+                      id="reqContent" 
+                      placeholder="예: 무신사 후드티, 쿠팡 휴지 등"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">금액 (원)</label>
+                    <input 
+                      type="number" 
+                      id="reqAmount" 
+                      placeholder="금액 입력"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const content = document.getElementById('reqContent').value;
+                    const amount = document.getElementById('reqAmount').value;
+                    if (!content || !amount) return alert('모든 항목을 입력해주세요.');
+                    handleCreateRequest(content, amount);
+                  }}
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  구매 요청 올리기 & 친구들 알리기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 4. Add Direct Expense Modal */}
+          {showAddExpenseModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">💰 바로 지출 기록</h3>
+                  <button onClick={() => setShowAddExpenseModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">사용 내역</label>
+                    <input 
+                      type="text" 
+                      id="expContent" 
+                      placeholder="예: 스타벅스 커피"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">금액 (원)</label>
+                    <input 
+                      type="number" 
+                      id="expAmount" 
+                      placeholder="금액 입력"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">날짜</label>
+                    <input 
+                      type="date" 
+                      id="expDate" 
+                      defaultValue={TODAY_STR}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">메모 (선택)</label>
+                    <input 
+                      type="text" 
+                      id="expMemo" 
+                      placeholder="추가 메모"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const content = document.getElementById('expContent').value;
+                    const amount = document.getElementById('expAmount').value;
+                    const date = document.getElementById('expDate').value;
+                    const memo = document.getElementById('expMemo').value;
+                    if (!content || !amount) return alert('내용과 금액을 입력해주세요.');
+                    handleCreateExpense(content, amount, date, memo);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  지출 기록 저장
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 5. Reject Reason Modal */}
+          {showRejectModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <h3 className="font-bold text-base text-slate-800">👎 거절 사유 입력</h3>
+                <input 
+                  type="text" 
+                  id="rejectReasonInput" 
+                  placeholder="예: 지금은 예산이 부족해요"
+                  className="w-full bg-slate-50 border rounded-xl p-3 text-sm focus:outline-rose-500"
+                />
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => setShowRejectModal(null)}
+                    className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold p-3 rounded-2xl"
+                  >
+                    취소
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const reason = document.getElementById('rejectReasonInput').value;
+                      handleVoteApproval(showRejectModal, 'rejected', reason);
+                    }}
+                    className="flex-1 bg-rose-500 hover:bg-rose-600 text-white font-bold p-3 rounded-2xl shadow-md"
+                  >
+                    거절 전달
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 6. Edit Expense Modal */}
+          {showEditExpenseModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">✏️ 지출 내역 수정</h3>
+                  <button onClick={() => setShowEditExpenseModal(null)} className="text-slate-400">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">사용 내역</label>
+                    <input 
+                      type="text" 
+                      id="editExpContent" 
+                      defaultValue={showEditExpenseModal.content}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">금액 (원)</label>
+                    <input 
+                      type="number" 
+                      id="editExpAmount" 
+                      defaultValue={showEditExpenseModal.amount}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">날짜</label>
+                    <input 
+                      type="date" 
+                      id="editExpDate" 
+                      defaultValue={showEditExpenseModal.date}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">메모</label>
+                    <input 
+                      type="text" 
+                      id="editExpMemo" 
+                      defaultValue={showEditExpenseModal.memo}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const content = document.getElementById('editExpContent').value;
+                    const amount = document.getElementById('editExpAmount').value;
+                    const date = document.getElementById('editExpDate').value;
+                    const memo = document.getElementById('editExpMemo').value;
+                    handleUpdateExpense(showEditExpenseModal.id, content, amount, date, memo);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  수정 완료
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 7. DB Settings Modal */}
+          {showDbSettingsModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">🔗 Supabase DB 연동 설정</h3>
+                  <button onClick={() => setShowDbSettingsModal(false)} className="text-slate-400">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-600">Supabase URL</label>
+                    <input 
+                      type="text" 
+                      placeholder="https://xxxx.supabase.co"
+                      value={supabaseUrl}
+                      onChange={(e) => setSupabaseUrl(e.target.value)}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-2.5 focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600">Supabase Anon Key</label>
+                    <input 
+                      type="password" 
+                      placeholder="eyJhbGciOi..."
+                      value={supabaseKey}
+                      onChange={(e) => setSupabaseKey(e.target.value)}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-2.5 focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex space-x-2 pt-2">
+                  <button 
+                    onClick={() => {
+                      localStorage.setItem('supabase_url', supabaseUrl);
+                      localStorage.setItem('supabase_key', supabaseKey);
+                      setShowDbSettingsModal(false);
+                      alert('저장되었습니다!');
+                      window.location.reload();
+                    }}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3 rounded-2xl shadow-md text-xs"
+                  >
+                    저장 및 적용
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setSupabaseUrl('');
+                      setSupabaseKey('');
+                      localStorage.removeItem('supabase_url');
+                      localStorage.removeItem('supabase_key');
+                      setShowDbSettingsModal(false);
+                      alert('연동이 해제되었습니다 (로컬 데모 모드)');
+                      window.location.reload();
+                    }}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold p-3 rounded-2xl text-xs"
+                  >
+                    연동 해제
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 8. Add User Modal */}
+          {showAddUserModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <h3 className="font-bold text-base text-slate-800">👤 새 친구 추가</h3>
+                <div className="space-y-3">
+                  <input 
+                    type="text" 
+                    id="newUserNameInput" 
+                    placeholder="친구 이름 (예: 지민)"
+                    className="w-full bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                  />
+                  <input 
+                    type="password" 
+                    id="newUserPassInput" 
+                    placeholder="초기 개인 비밀번호 (기본: 1234)"
+                    className="w-full bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                  />
+                </div>
+                <div className="flex space-x-2">
+                  <button onClick={() => setShowAddUserModal(false)} className="flex-1 bg-slate-200 text-slate-700 font-bold p-3 rounded-2xl">취소</button>
+                  <button 
+                    onClick={() => {
+                      const name = document.getElementById('newUserNameInput').value;
+                      const pass = document.getElementById('newUserPassInput').value;
+                      handleAddUser(name, pass);
+                    }}
+                    className="flex-1 bg-emerald-600 text-white font-bold p-3 rounded-2xl shadow-md"
+                  >
+                    추가
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 9. Edit My Profile Modal */}
+          {showEditProfileModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">⚙️ 프로필 및 비밀번호 변경</h3>
+                  <button onClick={() => setShowEditProfileModal(false)} className="text-slate-400">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">이름</label>
+                    <input 
+                      type="text" 
+                      id="editProfileName" 
+                      defaultValue={currentUser?.name}
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">새 개인 비밀번호</label>
+                    <input 
+                      type="password" 
+                      id="editProfilePass" 
+                      placeholder="변경할 비밀번호 변경"
+                      className="w-full mt-1 bg-slate-50 border rounded-xl p-3 text-sm focus:outline-emerald-500"
+                    />
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    const name = document.getElementById('editProfileName').value;
+                    const pass = document.getElementById('editProfilePass').value;
+                    handleUpdateMyProfile(name, pass);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold p-3.5 rounded-2xl shadow-md transition"
+                >
+                  변경 저장
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   
