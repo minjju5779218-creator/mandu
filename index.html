@@ -94,7 +94,7 @@
       const [selectedUserForLogin, setSelectedUserForLogin] = useState(null);
       
       const [showAddRequestModal, setShowAddRequestModal] = useState(false);
-      const [showEditRequestModal, setShowEditRequestModal] = useState(null); // 재결재용 수정 모달 state
+      const [showEditRequestModal, setShowEditRequestModal] = useState(null);
       const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
       const [showEditExpenseModal, setShowEditExpenseModal] = useState(null);
       const [showRejectModal, setShowRejectModal] = useState(null);
@@ -336,12 +336,10 @@
         }, 100);
       };
 
-      // 거절된 요청을 수정하여 재결재 올리는 핸들러
       const handleUpdateRequest = async (reqId, content, amount) => {
         if (!currentUser) return;
 
         if (supabaseClient) {
-          // 1. 요청 내용 업데이트 및 상태를 다시 pending으로 초기화
           const { error: reqError } = await supabaseClient
             .from('purchase_requests')
             .update({
@@ -354,7 +352,6 @@
 
           if (reqError) return alert('재결재 수정 실패: ' + reqError.message);
 
-          // 2. 기존 거절/승인되었던 투표(approvals) 기록들을 초기화(다시 대기 상태로 변경)
           const { error: appError } = await supabaseClient
             .from('approvals')
             .update({
@@ -458,7 +455,6 @@
           return;
         }
 
-        // 승인 완료 상태인지 철저히 검증 (거절되거나 대기중인 건은 원천 차단)
         const statusInfo = getCalculatedRequestStatus(req);
         if (statusInfo.code !== 'approved') {
           alert('승인 완료된 결재 건만 지출 내역으로 적용할 수 있습니다.');
@@ -495,7 +491,6 @@
         }
       };
 
-      // ✅ 수정된 handleUpdateExpense 함수
       const handleCreateExpense = async (content, amount, date = TODAY_STR, memo = '') => {
         if (!currentUser) return;
 
@@ -939,7 +934,6 @@
                             </button>
                           </div>
 
-                          {/* 거절된 경우 거절 사유 전체 표시, 승인/대기 상태 표시 */}
                           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex flex-wrap gap-2 text-xs">
                             {activeUsers.filter(u => u.id !== req.requester_id).map(u => {
                               const appItem = reqApprovals.find(a => a.user_id === u.id);
@@ -965,10 +959,8 @@
                             </span>
 
                             <div className="flex space-x-2">
-                              {/* 본인 요청인 경우 */}
                               {req.requester_id === currentUser?.id && statusInfo.code !== 'purchased' && (
                                 <>
-                                  {/* 거절된 상태라면 재결재 수정 버튼 노출 */}
                                   {statusInfo.code === 'rejected' && (
                                     <button 
                                       onClick={() => setShowEditRequestModal(req)}
@@ -986,7 +978,6 @@
                                 </>
                               )}
 
-                              {/* 다른 사람 요청인 경우 (투표) */}
                               {req.requester_id !== currentUser?.id && statusInfo.code !== 'purchased' && (
                                 <>
                                   <button 
@@ -1004,7 +995,6 @@
                                 </>
                               )}
 
-                              {/* 승인 완료되고 본인 요청인 경우 지출 적용 */}
                               {statusInfo.code === 'approved' && req.requester_id === currentUser?.id && (
                                 <button 
                                   onClick={() => handleCompletePurchase(req)}
@@ -1461,7 +1451,6 @@
             </div>
           )}
 
-          {/* 거절된 요청 수정 후 재결재 모달 */}
           {showEditRequestModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
