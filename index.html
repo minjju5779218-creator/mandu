@@ -495,6 +495,7 @@
         }
       };
 
+      // ✅ 수정된 handleUpdateExpense 함수
       const handleCreateExpense = async (content, amount, date = TODAY_STR, memo = '') => {
         if (!currentUser) return;
 
@@ -530,8 +531,7 @@
             content,
             amount: Number(amount),
             date,
-            memo,
-            updated_at: new Date().toISOString()
+            memo
           }).eq('id', id);
 
           if (error) return alert('수정 실패: ' + error.message);
